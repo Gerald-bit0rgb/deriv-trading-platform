@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# render.yaml — Infrastructure-as-code for Render.com
+# Commit this file; Render will read it automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── FastAPI Web Service ───────────────────────────────────────────────────
+  - type: web
+    name: deriv-trading-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free               # change to "starter" or higher for production
+    region: oregon           # choose: oregon | frankfurt | singapore | ohio
+    branch: main
+    autoDeploy: true         # redeploy automatically on every git push
+
+    envVars:
+      # App settings
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+
+      # Generate a strong secret: python -c "import secrets; print(secrets.token_hex(64))"
+      - key: SECRET_KEY
+        generateValue: true  # Render generates a random value once
+
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "30"
+
+      # Database (synced from the Postgres service below)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: deriv-trading-db
+          property: connectionString
+        # Render provides this as postgresql://... so we transform it
+      - key: SYNC_DATABASE_URL
+        fromDatabase:
+          name: deriv-trading-db
+          property: connectionString
+
+      # Deriv credentials — fill in Render dashboard, never in this file
+      - key: DERIV_APP_ID
+        sync: false          # "sync: false" means you set it manually in the dashboard
+      - key: DERIV_WS_URL
+        value: wss://ws.derivws.com/websockets/v3
+
+      # CORS — add your app domain after deployment
+      - key: CORS_ORIGINS
+        value: "https://deriv-trading-backend.onrender.com"
+
+      # Firebase (optional push notifications)
+      - key: FIREBASE_CREDENTIALS_BASE64
+        sync: false
+
+      - key: LOG_LEVEL
+        value: INFO
+
+    healthCheckPath: /health
+
+  # ── PostgreSQL Database ───────────────────────────────────────────────────
+databases:
+  - name: deriv-trading-db
+    plan: free               # free tier: 1 GB, 90-day expiry — upgrade for production
+    region: oregon
+    databaseName: deriv_trading
+    user: deriv_user
