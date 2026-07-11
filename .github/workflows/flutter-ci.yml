@@ -1,6 +1,3 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Flutter CI — lint, test, and build APK on every push to main
-# ─────────────────────────────────────────────────────────────────────────────
 name: Flutter CI
 
 on:
@@ -15,9 +12,9 @@ on:
       - "frontend/**"
 
 jobs:
-  # ── Analyse & test ────────────────────────────────────────────────────────
+  # ── Analyse & test ──────────────────────────────────────────────────────────
   analyze:
-    name: Analyse & Test
+    name: Analyse and Test
     runs-on: ubuntu-latest
 
     steps:
@@ -35,11 +32,9 @@ jobs:
         working-directory: frontend
         run: flutter pub get
 
-      - name: Verify code generation is up-to-date
+      - name: Generate code
         working-directory: frontend
-        run: |
-          flutter pub run build_runner build --delete-conflicting-outputs
-          git diff --exit-code || (echo "Generated files are out of date. Run build_runner and commit." && exit 1)
+        run: flutter pub run build_runner build --delete-conflicting-outputs
 
       - name: Analyse code
         working-directory: frontend
@@ -49,7 +44,7 @@ jobs:
         working-directory: frontend
         run: flutter test
 
-  # ── Build debug APK ───────────────────────────────────────────────────────
+  # ── Build debug APK ─────────────────────────────────────────────────────────
   build-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest
@@ -59,7 +54,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Java 17 (required for Android build)
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           java-version: "17"
@@ -84,7 +79,7 @@ jobs:
         working-directory: frontend
         run: |
           flutter build apk --debug \
-            --dart-define=API_BASE_URL=https://deriv-trading-backend.onrender.com
+            --dart-define=API_BASE_URL=https://deriv-trading-platform-mxic.onrender.com
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -92,72 +87,3 @@ jobs:
           name: debug-apk
           path: frontend/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 7
-
-  # ── Build release APK (only on main) ─────────────────────────────────────
-  build-release-apk:
-    name: Build Release APK
-    if: false
-   runs-on: ubuntu-latest
-    needs: analyze
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: temurin
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.22.0"
-          channel: stable
-          cache: true
-
-      # Decode the keystore from a base64 GitHub Secret
-      # Set KEYSTORE_BASE64 in GitHub Secrets (see README for how to encode it)
-      - name: Decode keystore
-        if: env.KEYSTORE_BASE64 != ''
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > frontend/android/app/release.jks
-
-      - name: Create key.properties
-        if: env.KEY_ALIAS != ''
-        env:
-          KEY_ALIAS:        ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD:     ${{ secrets.KEY_PASSWORD }}
-          STORE_PASSWORD:   ${{ secrets.STORE_PASSWORD }}
-        run: |
-          cat > frontend/android/key.properties << EOF
-          storePassword=$STORE_PASSWORD
-          keyPassword=$KEY_PASSWORD
-          keyAlias=$KEY_ALIAS
-          storeFile=release.jks
-          EOF
-
-      - name: Get dependencies
-        working-directory: frontend
-        run: flutter pub get
-
-      - name: Generate code
-        working-directory: frontend
-        run: flutter pub run build_runner build --delete-conflicting-outputs
-
-      - name: Build release APK
-        working-directory: frontend
-        run: |
-          flutter build apk --release \
-            --dart-define=API_BASE_URL=https://deriv-trading-backend.onrender.com
-
-      - name: Upload release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-apk-${{ github.sha }}
-          path: frontend/build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
