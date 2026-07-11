@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/trade_model.dart';
-import '../../../data/providers/auth_provider.dart';
 import '../../../data/services/trading_service.dart';
 import '../../widgets/trade/trade_card.dart';
 
@@ -79,8 +78,6 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
   @override
   Widget build(BuildContext context) {
     final openAsync = ref.watch(openTradesProvider);
-    final theme = Theme.of(context);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Trading')),
       body: ListView(
