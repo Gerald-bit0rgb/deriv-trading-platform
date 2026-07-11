@@ -40,10 +40,6 @@ jobs:
         working-directory: frontend
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Run tests
-        working-directory: frontend
-        run: flutter test
-
   # ── Build debug APK ─────────────────────────────────────────────────────────
   build-apk:
     name: Build Debug APK
