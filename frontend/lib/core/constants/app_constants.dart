@@ -13,7 +13,8 @@ class AppConstants {
   // Change this to your Render URL after deployment
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://deriv-trading-backend.onrender.com',
+    defaultValue: 'https://deriv-trading-platform-mxic.onrender.com',
+
   );
   static const String apiPrefix = '/api/v1';
   static const int connectTimeoutMs = 15000;
