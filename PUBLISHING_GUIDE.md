@@ -19,20 +19,103 @@ Last updated: July 2026
 
 ## TABLE OF CONTENTS
 
+0. **App stopped working — check these first**
 1. Accounts you need
 2. First time setup — push code to GitHub
-3. Deploy database on Render
+3. How to create a database on Render (detailed)
 4. Generate secret key
 5. Get Deriv App ID and PAT token
 6. Deploy backend on Render
 7. Build the APK
 8. First time app setup on phone
 9. How to update the app in future
-10. **What to do when things expire**
-11. How to upgrade Render from Free to Paid
-12. Troubleshooting
-13. All important links
-14. Environment variables reference
+10. What to do when things expire
+11. How to update your Deriv PAT token in the app
+12. How to upgrade Render from Free to Paid
+13. Troubleshooting
+14. All important links
+15. Environment variables reference
+16. Quick renewal checklist
+
+---
+
+## PART 0 — APP STOPPED WORKING — CHECK THESE FIRST
+
+Before doing anything else, go through this list in order.
+These cover 95% of all problems.
+
+---
+
+### Check 1 — Is the backend awake?
+
+Open this link in your browser:
+```
+https://deriv-trading-platform-mxic.onrender.com/health
+```
+
+What you see:
+- `{"status":"ok"}` → backend is running. Problem is elsewhere.
+- Page loads slowly (30-60 sec) then shows ok → server was sleeping. Wait and try app again.
+- Page shows error or does not load → backend is down. Check Render logs.
+
+---
+
+### Check 2 — Is the database still active?
+
+If the health check fails with a 500 error, the database may have expired.
+
+1. Go to: https://dashboard.render.com
+2. Click on your database (deriv-trading-db)
+3. Check the status:
+   - Green "Available" → database is fine
+   - Red "Expired" or "Deleted" → database expired (free tier lasts 90 days)
+   - If expired → see Part 10C to create a new one
+
+---
+
+### Check 3 — Is your Deriv PAT token still valid?
+
+If the dashboard loads but Start Bot shows error:
+
+1. Open the app on your phone
+2. Go to Profile tab
+3. Look at Deriv API Token section
+4. If it says "Token is saved and active" in green → token is saved
+5. Tap Start Bot — if it still says error, the saved token may be invalid
+6. Fix: create a new PAT token and update it in the app (see Part 11)
+
+---
+
+### Check 4 — Is your GitHub token still valid?
+
+Only matters if you are trying to push code or build a new APK.
+
+1. Open Command Prompt on your VPS
+2. Run: `git push origin main`
+3. If it asks for password and fails → token expired
+4. Fix: create new token at https://github.com/settings/tokens (see Part 10A)
+
+---
+
+### Check 5 — Is Render deployed with the latest code?
+
+1. Go to: https://dashboard.render.com
+2. Click your backend service
+3. Look at the "Last deployed" time
+4. If it shows an old date → click Manual Deploy → Deploy latest commit
+
+---
+
+### Summary — most common problems and quick fixes
+
+| Problem | Most likely cause | Quick fix |
+|---------|------------------|-----------|
+| Dashboard won't load | Server sleeping | Wait 60 sec, pull to refresh |
+| Can't log in | Database expired | Create new database (Part 10C) |
+| Start Bot says error | PAT token invalid | Create new PAT token (Part 11) |
+| Can't push to GitHub | GitHub token expired | New token at github.com/settings/tokens |
+| Bot not trading | Bot not started | Go to Dashboard → tap Start Bot |
+| Balance shows 0 | Demo account not connected | Check PAT token in Profile |
 
 ---
 
@@ -73,11 +156,11 @@ git config --global user.email "your@email.com"
 1. Go to: https://github.com/settings/tokens
 2. Click "Generate new token (classic)"
 3. Name: VPS
-4. Expiration: 90 days
-5. Check: repo (top checkbox)
+4. Expiration: No expiration (recommended to avoid having to renew)
+5. Check: repo (the top checkbox — selects everything below it)
 6. Click "Generate token"
-7. COPY IT — you cannot see it again
-8. Save it in Notepad
+7. COPY IT — you cannot see it again after leaving the page
+8. Save it in Notepad on your VPS
 
 ### Step 3 — Create GitHub repository
 1. Go to: https://github.com/new
@@ -96,30 +179,90 @@ git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/deriv-trading-platform.git
 git push -u origin main
 ```
-When asked for password — paste your Personal Access Token
+When it asks for password — paste your Personal Access Token (not your GitHub login password)
 
 ### Step 5 — Verify
 Open: https://github.com/YOUR_USERNAME/deriv-trading-platform
-You should see all files listed.
+You should see all project files listed.
 
 ---
 
-## PART 3 — DEPLOY DATABASE ON RENDER
+## PART 3 — HOW TO CREATE A DATABASE ON RENDER (DETAILED)
 
+You need to do this the first time AND every 90 days if you are on the free plan.
+
+### Step 1 — Log in to Render
 1. Go to: https://dashboard.render.com
-2. Click: New + → PostgreSQL
-3. Fill in:
-   - Name: deriv-trading-db
-   - Database: deriv_trading
-   - User: deriv_user
-   - Region: Oregon (US West)
-   - Plan: Free (or Starter for production)
-4. Click: Create Database
-5. Wait 2 minutes for status "Available"
-6. Click on the database → scroll to Connections
-7. Copy the "Internal Database URL"
-   - Looks like: postgresql://deriv_user:PASSWORD@dpg-xxxxx-a/deriv_trading
-8. Save it in Notepad
+2. Log in with your GitHub account
+
+### Step 2 — Create new PostgreSQL database
+1. Click the blue button **"New +"** at the top right
+2. A dropdown menu appears — click **"PostgreSQL"**
+
+### Step 3 — Fill in the database settings
+
+You will see a form. Fill in exactly:
+
+| Field | What to type |
+|-------|-------------|
+| Name | `deriv-trading-db` |
+| Database | `deriv_trading` |
+| User | `deriv_user` |
+| Region | Oregon (US West) — same region as your web service |
+| PostgreSQL Version | 16 (or whatever is default) |
+| Plan | Free (for testing) or Starter for permanent use |
+
+Leave all other fields as default.
+
+### Step 4 — Click "Create Database"
+
+Wait 1-2 minutes. You will see the status change to "Available" in green.
+
+### Step 5 — Copy the database URL
+
+This is the most important step.
+
+1. Click on your newly created database to open it
+2. Scroll down until you see the **"Connections"** section
+3. You will see several URLs. You need the **"Internal Database URL"**
+4. It looks like this:
+   ```
+   postgresql://deriv_user:SomeRandomPassword@dpg-xxxxxxxxxx-a/deriv_trading
+   ```
+5. Click the copy icon next to it
+6. Paste it in Notepad
+
+### Step 6 — Create TWO versions of the URL
+
+From the URL you copied, create two versions:
+
+**Version 1 — DATABASE_URL** (change `postgresql://` to `postgresql+asyncpg://`):
+```
+postgresql+asyncpg://deriv_user:SomeRandomPassword@dpg-xxxxxxxxxx-a/deriv_trading
+```
+
+**Version 2 — SYNC_DATABASE_URL** (keep exactly as copied):
+```
+postgresql://deriv_user:SomeRandomPassword@dpg-xxxxxxxxxx-a/deriv_trading
+```
+
+You will paste both of these into Render environment variables in Part 6.
+
+### Step 7 — Update Render if replacing an expired database
+
+If you are creating a new database to replace an expired one:
+
+1. Go to your backend service on Render
+2. Click **"Environment"** tab
+3. Find **DATABASE_URL** — click the pencil icon to edit it
+4. Delete the old value completely
+5. Type the new DATABASE_URL (with +asyncpg)
+6. Find **SYNC_DATABASE_URL** — edit it
+7. Delete the old value
+8. Type the new SYNC_DATABASE_URL (without +asyncpg)
+9. Click **"Save Changes"**
+10. Render will redeploy automatically
+11. Wait for status to say **"Live"**
 
 ---
 
@@ -129,33 +272,44 @@ Open Command Prompt on your VPS:
 ```
 python -c "import secrets; print(secrets.token_hex(64))"
 ```
-Copy the output. Save it in Notepad.
-This is your SECRET_KEY — never share it.
+Copy the long string it prints. Save it in Notepad.
+
+This is your SECRET_KEY. Rules:
+- Never share it with anyone
+- Never change it after the app is live — it will log out all users
+- If you lose it, generate a new one but all users will be logged out
 
 ---
 
 ## PART 5 — GET DERIV APP ID AND PAT TOKEN
 
-### Get App ID
+### Get your App ID (one time only — does not expire)
 1. Go to: https://developers.deriv.com
-2. Sign up with email (use different email from app.deriv.com)
-3. Go to: Registered Apps → Create new app
-4. Fill in:
-   - App name: TradingBot
-   - Redirect URL: https://YOUR-SERVICE-NAME.onrender.com
-   - Scopes: trade, account_manage
-5. Click Create
-6. Your App ID appears — looks like: 33O8kU94RkSPJmJNahuno
-7. Save it
+2. Sign up — use a different email from app.deriv.com
+3. Go to: Registered Apps in the dashboard
+4. Click "Create new app"
+5. Fill in:
+   - App name: TradingBot (no special characters)
+   - Redirect URL: https://deriv-trading-platform-mxic.onrender.com
+   - Scopes: check trade and account_manage
+6. Click Create
+7. Your App ID appears in the list — looks like: 33O8kU94RkSPJmJNahuno
+8. Save it — you need it in Render environment variables
 
-### Get PAT Token
-1. In the same developer dashboard click: API Tokens
-2. Click Create new token
-3. Select scopes: trade, account_manage
-4. Click Create
-5. Copy the token — starts with pat_
-6. Save it — this goes into the app on your phone
-7. NEVER share this token — it gives access to your trading account
+Your current App ID is: **33O8kU94RkSPJmJNahuno**
+This does not expire. You only create it once.
+
+### Get a PAT Token (renew every 3-6 months)
+1. Go to: https://developers.deriv.com
+2. Log in
+3. Click "API Tokens" in the left menu
+4. Click "Create new token"
+5. Select scopes: trade and account_manage
+6. Click Create
+7. Copy the token immediately — it starts with pat_
+8. You CANNOT see it again after leaving the page
+9. Save it in Notepad
+10. Paste it into the app (see Part 11 for how to update it)
 
 ---
 
@@ -163,451 +317,415 @@ This is your SECRET_KEY — never share it.
 
 ### Create Web Service
 1. Render dashboard → New + → Web Service
-2. Click: Build and deploy from a Git repository
-3. Click: Connect next to deriv-trading-platform
+2. Select: Build and deploy from a Git repository
+3. Connect to: deriv-trading-platform
+   - If not visible, click "Configure account" → give Render access to your repos
 4. Fill in:
    - Name: deriv-trading-backend
-   - Region: Oregon
+   - Region: Oregon (same as database)
    - Branch: main
    - Runtime: Docker
    - Instance Type: Free (or Starter for 24/7)
 
 ### Add Environment Variables
-Click "Add Environment Variable" for each:
+Click "Add Environment Variable" for each row:
 
-| Key | Value |
-|-----|-------|
-| APP_ENV | production |
-| DEBUG | false |
-| SECRET_KEY | your generated key |
-| ALGORITHM | HS256 |
-| ACCESS_TOKEN_EXPIRE_MINUTES | 60 |
-| REFRESH_TOKEN_EXPIRE_DAYS | 30 |
-| DATABASE_URL | postgresql+asyncpg://user:pass@host/db |
-| SYNC_DATABASE_URL | postgresql://user:pass@host/db |
-| DERIV_APP_ID | 33O8kU94RkSPJmJNahuno |
-| DERIV_WS_URL | wss://ws.derivws.com/websockets/v3 |
-| CORS_ORIGINS | https://YOUR-SERVICE.onrender.com |
-| LOG_LEVEL | INFO |
+| Key | Value | Notes |
+|-----|-------|-------|
+| APP_ENV | production | |
+| DEBUG | false | |
+| SECRET_KEY | paste your generated key | the long random string from Part 4 |
+| ALGORITHM | HS256 | |
+| ACCESS_TOKEN_EXPIRE_MINUTES | 60 | |
+| REFRESH_TOKEN_EXPIRE_DAYS | 30 | |
+| DATABASE_URL | postgresql+asyncpg://user:pass@host/db | from Part 3 Step 6 Version 1 |
+| SYNC_DATABASE_URL | postgresql://user:pass@host/db | from Part 3 Step 6 Version 2 |
+| DERIV_APP_ID | 33O8kU94RkSPJmJNahuno | your App ID from Part 5 |
+| DERIV_WS_URL | wss://ws.derivws.com/websockets/v3 | |
+| CORS_ORIGINS | https://deriv-trading-platform-mxic.onrender.com | your Render URL |
+| LOG_LEVEL | INFO | |
 
-DATABASE_URL note:
-- If database URL is: postgresql://user:pass@host/db
-- DATABASE_URL = postgresql+asyncpg://user:pass@host/db (change prefix)
-- SYNC_DATABASE_URL = postgresql://user:pass@host/db (keep original)
-
-### Deploy and Test
+### Deploy and verify
 1. Click "Create Web Service"
-2. Watch Logs tab — wait for: INFO: Application startup complete.
-3. Test: open https://YOUR-SERVICE.onrender.com/health
-4. You should see: {"status":"ok"}
+2. Watch the Logs tab — wait for: `INFO: Application startup complete.`
+3. Status turns green and shows "Live"
+4. Test it: open https://YOUR-SERVICE.onrender.com/health
+5. You should see: `{"status":"ok","service":"Deriv AI Trading Platform"}`
 
 ---
 
 ## PART 7 — BUILD THE APK
 
-### How GitHub Actions builds it automatically
-Every time you push code to GitHub, the APK builds automatically on GitHub's servers.
-No Flutter installation needed on your VPS.
+GitHub Actions builds the APK automatically every time you push code.
+No Flutter needed on your VPS.
 
-### Update backend URL in app
-Open file:
+### Update backend URL in app (only needed if your Render URL changes)
+Open this file on your VPS:
 ```
 C:\Users\Administrator\deriv-trading-platform\frontend\lib\core\constants\app_constants.dart
 ```
-Change this line to your actual Render URL:
+Find this line and change to your actual URL:
 ```dart
 defaultValue: 'https://deriv-trading-platform-mxic.onrender.com',
 ```
 
-### Trigger build
+### Trigger APK build
 ```
 cd C:\Users\Administrator\deriv-trading-platform
 git add .
-git commit -m "Set backend URL"
+git commit -m "trigger build"
 git push origin main
 ```
 
 ### Download APK
-1. Go to: https://github.com/YOUR_USERNAME/deriv-trading-platform
+1. Go to: https://github.com/Gerald-bit0rgb/deriv-trading-platform
 2. Click: Actions tab
-3. Click the latest Flutter CI run
+3. Click the latest "Flutter CI" run
 4. Wait for green tick (10-15 minutes)
-5. Scroll to bottom → Artifacts → click debug-apk
+5. Scroll to bottom → Artifacts → click "debug-apk"
 6. Extract the zip → get app-debug.apk
 
-### Send to phone and install
-Via Telegram:
-- Open: https://web.telegram.org
-- Saved Messages → attach APK → send
-- On phone: Telegram → Saved Messages → download → tap to install
+### Send APK to phone
+**Via Telegram:**
+1. Open: https://web.telegram.org on VPS browser
+2. Log in → click Saved Messages
+3. Click paperclip → attach app-debug.apk → send
+4. On phone: Telegram → Saved Messages → download → tap to install
 
-Via Google Drive:
-- Open: https://drive.google.com
-- Upload APK → on phone download and install
+**Via Google Drive:**
+1. Open: https://drive.google.com on VPS browser
+2. New → File upload → upload app-debug.apk
+3. On phone: Google Drive → download → install
 
-Enable unknown apps on phone:
-- Settings → search "Install unknown apps" → Allow
+**Allow installation on phone first:**
+Settings → search "Install unknown apps" → allow Telegram or your file manager
 
 ---
 
-## PART 8 — FIRST TIME APP SETUP
+## PART 8 — FIRST TIME APP SETUP ON PHONE
 
-1. Open Deriv AI Trader on phone
-2. Tap Sign Up → fill in email, username, password
-   - Password must have: uppercase letter + number + min 8 chars
+1. Open Deriv AI Trader
+2. Tap Sign Up
+3. Fill in: email, username, password
+   - Password must have: uppercase letter + number + minimum 8 characters
    - Example: Gerald2024!
-3. Tap Create Account
-4. Go to Profile tab → Deriv API Token section
-5. Paste your pat_ token → tap Save Token
-6. Go to Risk settings → set safe limits:
+4. Tap Create Account
+5. Go to Profile tab → Deriv API Token section
+6. Paste your pat_ token → tap Save Token → green message = success
+7. Go to Risk settings → set safe limits for testing:
    - Default Stake: 1
    - Max Stake: 5
    - Max Daily Loss: 20
    - Max Daily Trades: 10
-7. On Dashboard → choose your trading pair
-8. Make sure Account Type shows DEMO
-9. Tap Start Bot → wait for RUNNING status
+8. Go to Dashboard → select your trading pair → tap Change to pick one
+9. Make sure Account Type shows DEMO (not Real)
+10. Tap Start Bot → wait 10-15 seconds → status shows RUNNING
 
 ---
 
 ## PART 9 — HOW TO UPDATE THE APP IN FUTURE
 
-### Update backend
+### Update backend code
+1. Make your code changes on the VPS
+2. Run:
 ```
 cd C:\Users\Administrator\deriv-trading-platform
 git add .
 git commit -m "describe your change"
 git push origin main
 ```
-Then: Render → Manual Deploy → Deploy latest commit
+3. Go to Render → Manual Deploy → Deploy latest commit
+4. Wait for Live
 
 ### Update Flutter app
+1. Make your changes on the VPS
+2. Run:
 ```
 cd C:\Users\Administrator\deriv-trading-platform
 git add .
 git commit -m "describe your change"
 git push origin main
 ```
-GitHub Actions builds new APK automatically.
-Download from Actions → Artifacts → install on phone.
+3. GitHub Actions builds new APK automatically
+4. Download from Actions → Artifacts
+5. Install on phone (replaces old version)
 
 ---
 
 ## PART 10 — WHAT TO DO WHEN THINGS EXPIRE
 
-This is the most important section. Read it carefully.
-
 ---
 
 ### 10A — GitHub Personal Access Token expires
 
-Symptoms:
-- `git push` fails with "Authentication failed"
-- Cannot push code to GitHub anymore
+Signs it has expired:
+- git push fails with "Authentication failed"
+- Cannot push code to GitHub
 
 How to fix:
 1. Go to: https://github.com/settings/tokens
 2. Click "Generate new token (classic)"
-3. Name: VPS-New
-4. Expiration: 90 days (or "No expiration" to avoid this problem)
-5. Check: repo
+3. Name: VPS-Renewed
+4. Expiration: No expiration (set this to never have this problem again)
+5. Check: repo (top checkbox)
 6. Click "Generate token"
-7. Copy the new token
-8. Next time you push, use the new token as password
+7. COPY IT immediately
+8. Save in Notepad
+9. Next time you run git push, enter your GitHub username and paste the new token as password
 
-To avoid this problem in future:
-- When creating the token, set Expiration to "No expiration"
-- Or set it to 1 year so you only need to renew once a year
+Permanent fix: Always set expiration to "No expiration" when creating tokens.
 
 ---
 
-### 10B — Deriv PAT token expires or gets invalidated
+### 10B — Render Free Database expires (every 90 days)
 
-Symptoms:
-- App shows "Token is invalid" when starting the bot
-- Bot fails to connect to Deriv
-- Start Bot shows error on dashboard
+Signs it has expired:
+- Cannot log in to the app
+- Health check at /health returns 500 error
+- Render logs show "database does not exist" or connection errors
 
 How to fix:
+1. Follow Part 3 completely to create a new database
+2. Copy the new database URL (two versions)
+3. Go to Render → deriv-trading-backend → Environment tab
+4. Update DATABASE_URL with the new URL (with +asyncpg)
+5. Update SYNC_DATABASE_URL with the new URL (without +asyncpg)
+6. Click Save Changes
+7. Wait for Render to redeploy → status shows Live
+8. All old accounts and trades are gone — register a new account in the app
+
+Note: Render emails you 14 days before expiry. Watch your email.
+Permanent fix: Upgrade database to Starter plan ($7/month) — never expires.
+
+---
+
+### 10C — Deriv PAT token becomes invalid
+
+Signs it is invalid:
+- Start Bot shows error
+- Bot status goes from "connecting" to "error"
+- You see "The token is invalid" or similar message
+
+How to fix:
+1. Create a new PAT token (see Part 5 — Get PAT Token section)
+2. Then follow Part 11 below to put it in the app
+
+---
+
+## PART 11 — HOW TO UPDATE YOUR DERIV PAT TOKEN IN THE APP
+
+This is what you do every time you create a new PAT token.
+
+### Step 1 — Create the new token first
 1. Go to: https://developers.deriv.com
-2. Click API Tokens in the dashboard menu
-3. Delete the old token (click the trash icon)
-4. Click Create new token
-5. Select scopes: trade, account_manage
+2. Click "API Tokens" in the left menu
+3. Find your old token → click the trash/delete icon to remove it
+4. Click "Create new token"
+5. Select scopes: trade AND account_manage (both must be checked)
 6. Click Create
-7. Copy the new token (starts with pat_)
-8. Open your phone app
-9. Go to Profile tab
-10. Delete the old token in the field
-11. Paste the new token
-12. Tap Save Token
-13. Go to Dashboard → tap Start Bot
+7. The new token appears — copy it immediately (starts with pat_)
+8. You cannot see it again — if you miss it, delete and create another
 
-Note: Deriv PAT tokens do not have a set expiry date but they can be
-invalidated if you change your Deriv password or revoke them manually.
-Best practice: create a new token every 3-6 months for security.
+### Step 2 — Stop the bot if it is running
+1. Open the app on your phone
+2. Go to Dashboard
+3. If bot is Running or Paused → tap Stop Bot
+4. Wait for status to show STOPPED
 
----
+### Step 3 — Delete the old token in the app
+1. Go to Profile tab (bottom of screen)
+2. Scroll to "Deriv API Token" section
+3. Tap the eye icon to show the token field
+4. Select all the text in the field and delete it
+5. The field should be empty
 
-### 10C — Render Free Database expires (90 days)
+### Step 4 — Paste the new token
+1. The field is now empty
+2. Tap inside the field
+3. Paste your new pat_ token
+4. Make sure there are no spaces before or after the token
+5. Tap Save Token
+6. You should see a green message: "Deriv token saved!"
 
-Render's free PostgreSQL database expires after 90 days. When it expires:
-- All your trades and user accounts are deleted
-- The backend will crash on startup with database errors
+### Step 5 — Verify it works
+1. Go to Dashboard
+2. Tap Start Bot
+3. Wait 10-15 seconds
+4. Status should turn green and show RUNNING
+5. Balance should load from your Deriv account
 
-Symptoms:
-- App cannot log in
-- "Database connection failed" in Render logs
-- Health check returns 500 error
-
-How to fix — Option A (Free — lose data):
-1. Go to: https://dashboard.render.com
-2. Delete the old expired database
-3. Create a new PostgreSQL database (follow Part 3 again)
-4. Copy the new database URL
-5. Go to your backend service → Environment tab
-6. Update DATABASE_URL and SYNC_DATABASE_URL with new values
-7. Click Save Changes
-8. Render redeploys automatically
-9. All previous data is lost — you start fresh
-
-How to fix — Option B (Paid — keep data):
-1. Before the 90 days are up, upgrade to a paid database plan
-2. Go to: https://dashboard.render.com
-3. Click your database → Settings → Change Plan
-4. Select "Starter" ($7/month) or higher
-5. The database never expires and your data is safe
-
-Render sends you an email warning 14 days before expiry.
-Watch for emails from Render and act before it expires.
+If it still shows error after doing all this — double check you copied the full token and did not miss any characters at the beginning or end.
 
 ---
 
-### 10D — Render Free Web Service goes to sleep
-
-The free Render web service sleeps after 15 minutes of no activity.
-When asleep, the first request takes 30-60 seconds to wake up.
-
-Symptoms:
-- App shows "Server is starting up. Pull down to refresh."
-- Bot cannot start because server is sleeping
-- Dashboard takes 60 seconds to load
-
-This is NOT an expiry — it happens every time you don't use the app for 15+ minutes.
-
-Temporary fix: Pull down to refresh on the dashboard and wait 60 seconds.
-
-Permanent fix — Upgrade to Starter:
-1. Go to: https://dashboard.render.com
-2. Click your backend service → Settings → Change Plan
-3. Select "Starter" ($7/month)
-4. Service runs 24/7, never sleeps
-5. Required for a trading bot that needs to run overnight
-
----
-
-### 10E — Render Starter plan renewal (monthly)
-
-If you upgrade to Starter ($7/month):
-- Render charges your card automatically every month
-- No manual action needed
-- If payment fails, service downgrades to free tier
-
-How to update payment:
-1. Go to: https://dashboard.render.com
-2. Click your profile icon → Billing
-3. Update card details if needed
-
----
-
-### 10F — Deriv Developer App ID
-
-Your App ID (33O8kU94RkSPJmJNahuno) does not expire.
-You only need to create a new one if:
-- You delete your developers.deriv.com account
-- You want to create a different app
-
-If you ever lose it:
-1. Go to: https://developers.deriv.com
-2. Click Registered Apps
-3. Your App ID is shown in the table
-
----
-
-### 10G — Complete system restart from scratch
-
-If everything breaks and you need to start completely from scratch:
-
-1. Create new GitHub token (Part 2)
-2. Create new Render database (Part 3)
-3. Generate new SECRET_KEY (Part 4)
-4. Create new Deriv PAT token (Part 5)
-5. Create new Render web service (Part 6)
-   - Use the same Deriv App ID: 33O8kU94RkSPJmJNahuno
-6. Push code to GitHub (Part 2, Step 4)
-7. Build new APK (Part 7)
-8. Register new account in app (Part 8)
-
-The code in your GitHub repo never expires — it is always there.
-Only the tokens, database, and hosting need renewal.
-
----
-
-## PART 11 — HOW TO UPGRADE RENDER FROM FREE TO PAID
+## PART 12 — HOW TO UPGRADE RENDER FROM FREE TO PAID
 
 ### Why upgrade?
 
-| Feature | Free | Starter ($7/month) |
-|---------|------|-------------------|
-| Web service sleep | Sleeps after 15 min | Never sleeps |
-| Database expiry | 90 days | Never expires |
-| Deploy speed | Slow | Fast |
-| Support | Community | Email support |
-| Custom domains | No | Yes |
+| What you get | Free plan | Starter ($7/month) |
+|-------------|-----------|-------------------|
+| Service sleep | Sleeps every 15 min | Never sleeps — 24/7 |
+| Database expiry | Expires after 90 days | Never expires |
+| Deploy speed | Slow (10+ min) | Fast |
+| Uptime | Not guaranteed | 99.9% uptime |
+| Good for trading bot | No | Yes |
 
-For a trading bot that needs to run 24/7 — you must upgrade.
+For a trading bot that needs to run while you sleep — you must upgrade.
 
-### How to upgrade the web service
-
+### Upgrade the web service (so it never sleeps)
 1. Go to: https://dashboard.render.com
-2. Click your backend service (deriv-trading-backend)
+2. Click your backend service: deriv-trading-backend
 3. Click the "Settings" tab
-4. Scroll to "Instance Type"
-5. Click "Change Plan"
-6. Select "Starter" ($7/month)
-7. Add a payment card if not already added
+4. Find "Instance Type" section
+5. Click "Change Plan" or "Upgrade"
+6. Select "Starter" — $7/month
+7. Add a payment card when prompted
 8. Click "Upgrade"
-9. Service restarts and never sleeps again
+9. Service restarts — it will never sleep again
 
-### How to upgrade the database
-
+### Upgrade the database (so it never expires)
 1. Go to: https://dashboard.render.com
-2. Click your database (deriv-trading-db)
-3. Click "Update Instance" or "Change Plan"
-4. Select "Starter" ($7/month)
+2. Click your database: deriv-trading-db
+3. Click "Settings" tab or look for "Upgrade" button
+4. Select "Starter" — $7/month
 5. Click "Upgrade"
-6. Database never expires
+6. Database never expires — your data is safe forever
 
-Total cost for full 24/7 operation: $14/month (web + database)
+### Total monthly cost
+- Web service Starter: $7/month
+- Database Starter: $7/month
+- Total: $14/month for full 24/7 professional operation
 
 ---
 
-## PART 12 — TROUBLESHOOTING
+## PART 13 — TROUBLESHOOTING
 
-### "Authentication failed" when doing git push
-- Your GitHub Personal Access Token expired
-- Fix: generate new token (Part 10A)
+### "Authentication failed" when running git push
+GitHub token expired. Fix: Part 10A — generate new token.
 
 ### "The token is invalid" when starting bot
-- Your Deriv PAT token is expired or wrong
-- Fix: create new PAT token (Part 10B)
+Deriv PAT token invalid. Fix: Part 11 — create and update PAT token.
 
-### "Could not connect to database"
-- Render free database expired after 90 days
-- Fix: create new database (Part 10C)
+### Cannot log in to app / "Database error"
+Render free database expired (90 days). Fix: Part 3 — create new database, update URLs in Render.
 
 ### "Server is starting up" on dashboard
-- Render free service is asleep
-- Fix: pull down to refresh and wait 60 seconds, or upgrade to Starter (Part 11)
+Render free service is sleeping. Fix: wait 60 seconds and pull to refresh. Or upgrade (Part 12).
 
-### "Failed to load dashboard"
-- Server sleeping or crashed
-- Fix: wait 60 seconds and refresh
+### "Failed to load dashboard" / dashboard shows error
+Server sleeping or crashed. Fix: check health at /health URL, wait 60 seconds, refresh.
 
-### Bot says error when starting
-- Check Profile → make sure PAT token is saved
-- Check Dashboard → make sure Account Type is set (Demo or Real)
-- Check Dashboard → make sure a trading pair is selected
+### Bot starts but immediately shows error
+Deriv PAT token invalid. Fix: Part 11.
+
+### Bot runs but never places trades
+Normal — bot waits for the MA Bias strategy conditions to align.
+4H EMA5 must be above or below EMA13 AND ADX above 20 AND 15M must confirm.
+On strong trending days it places many trades. On sideways days it waits.
 
 ### APK won't install on phone
-- Settings → search "Install unknown apps" → allow Telegram or file manager
+Enable unknown apps: Settings → search "Install unknown apps" → allow.
 
-### GitHub Actions build fails
-- Go to GitHub → Actions tab → click the failed run → copy error → fix it
+### GitHub Actions build shows red / failed
+Go to GitHub → Actions tab → click the failed run → read the error → fix it.
 
 ### Render deploy fails
-- Go to Render → your service → Logs tab → look for red errors
+Go to Render → your service → Logs tab → look for lines starting with ERROR.
 
 ---
 
-## PART 13 — ALL IMPORTANT LINKS
+## PART 14 — ALL IMPORTANT LINKS
 
-| Service | URL | Used for |
-|---------|-----|---------|
+| What | Link | Used for |
+|------|------|---------|
 | GitHub | https://github.com | Code storage |
-| GitHub Tokens | https://github.com/settings/tokens | Create/renew Personal Access Token |
+| GitHub tokens | https://github.com/settings/tokens | Create or renew Personal Access Token |
+| Your repo | https://github.com/Gerald-bit0rgb/deriv-trading-platform | Your code |
 | GitHub Actions | https://github.com/Gerald-bit0rgb/deriv-trading-platform/actions | APK build status |
-| Render Dashboard | https://dashboard.render.com | Backend and database hosting |
-| Render Billing | https://dashboard.render.com/billing | Upgrade plan, update card |
-| Backend Health | https://deriv-trading-platform-mxic.onrender.com/health | Check if backend is running |
-| Deriv Trading | https://app.deriv.com | Your trading account |
-| Deriv API Tokens | https://app.deriv.com/account/api-token | Get/renew trading tokens |
-| Deriv Developer | https://developers.deriv.com | App ID and PAT tokens |
-| Deriv Dev Tokens | https://developers.deriv.com (API Tokens section) | Renew PAT token |
+| Render dashboard | https://dashboard.render.com | Hosting control panel |
+| Render billing | https://dashboard.render.com/billing | Upgrade plan or update card |
+| Backend health | https://deriv-trading-platform-mxic.onrender.com/health | Check server is running |
+| Deriv trading | https://app.deriv.com | Your trading account (demo/real) |
+| Deriv developer | https://developers.deriv.com | App ID and PAT tokens |
+| Deriv PAT tokens | https://developers.deriv.com (API Tokens section) | Create or renew PAT token |
 
 ---
 
-## PART 14 — ENVIRONMENT VARIABLES REFERENCE
+## PART 15 — ENVIRONMENT VARIABLES REFERENCE
 
-These go in Render → deriv-trading-backend → Environment.
+These go in Render → deriv-trading-backend → Environment tab.
 
-```
-APP_ENV = production
-DEBUG = false
-SECRET_KEY = [your 128 char random key — never change after first deploy]
-ALGORITHM = HS256
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
-REFRESH_TOKEN_EXPIRE_DAYS = 30
-DATABASE_URL = postgresql+asyncpg://[user]:[pass]@[host]/[dbname]
-SYNC_DATABASE_URL = postgresql://[user]:[pass]@[host]/[dbname]
-DERIV_APP_ID = 33O8kU94RkSPJmJNahuno
-DERIV_WS_URL = wss://ws.derivws.com/websockets/v3
-CORS_ORIGINS = https://deriv-trading-platform-mxic.onrender.com
-LOG_LEVEL = INFO
-```
-
-Important notes:
-- SECRET_KEY: generate once with python -c "import secrets; print(secrets.token_hex(64))"
-- Never change SECRET_KEY after users have registered — it will log everyone out
-- DATABASE_URL: must start with postgresql+asyncpg://
-- SYNC_DATABASE_URL: must start with postgresql://
-- DERIV_APP_ID: your App ID from developers.deriv.com — does not expire
+| Key | Value | Notes |
+|-----|-------|-------|
+| APP_ENV | production | |
+| DEBUG | false | |
+| SECRET_KEY | your 128-char random key | generate once, never change |
+| ALGORITHM | HS256 | |
+| ACCESS_TOKEN_EXPIRE_MINUTES | 60 | |
+| REFRESH_TOKEN_EXPIRE_DAYS | 30 | |
+| DATABASE_URL | postgresql+asyncpg://... | from Render database — must have +asyncpg |
+| SYNC_DATABASE_URL | postgresql://... | same URL without +asyncpg |
+| DERIV_APP_ID | 33O8kU94RkSPJmJNahuno | your App ID — does not expire |
+| DERIV_WS_URL | wss://ws.derivws.com/websockets/v3 | never changes |
+| CORS_ORIGINS | https://deriv-trading-platform-mxic.onrender.com | your backend URL |
+| LOG_LEVEL | INFO | |
 
 ---
 
-## QUICK RENEWAL CHECKLIST
+## PART 16 — QUICK RENEWAL CHECKLIST
 
-Use this when something stops working:
-
+### Every 90 days (if on free Render plan):
 ```
-Every 90 days:
-[ ] Renew GitHub Personal Access Token (or set to "No expiration")
-[ ] Create new Render database if on free tier (or upgrade to paid)
-[ ] Create new Deriv PAT token in app (every 3-6 months for security)
+[ ] Create new Render database (Part 3)
+[ ] Update DATABASE_URL and SYNC_DATABASE_URL in Render environment (Part 3 Step 7)
+[ ] Redeploy backend on Render
+[ ] Register new account in app (old data is gone)
+```
 
-Every month (if on paid plan):
-[ ] Check Render billing — confirm card is valid
-[ ] Check backend health: https://deriv-trading-platform-mxic.onrender.com/health
+### Every 3-6 months (security best practice):
+```
+[ ] Create new Deriv PAT token (Part 5)
+[ ] Update token in app (Part 11)
+[ ] Test: Start Bot → confirm RUNNING status
+```
 
-When bot stops working:
-[ ] Check if PAT token is still valid — create new one from developers.deriv.com
-[ ] Check Render logs for errors
-[ ] Check if database is still active (free tier expires after 90 days)
+### When git push fails:
+```
+[ ] Go to github.com/settings/tokens
+[ ] Generate new token with "No expiration"
+[ ] Use it as password on next git push
+```
+
+### When bot stops working (quick check):
+```
+[ ] Open: https://deriv-trading-platform-mxic.onrender.com/health
+    → Shows ok? → Backend is running, check PAT token
+    → Shows error? → Check Render database and redeploy
+[ ] In app: Profile → is Deriv token saved? → if not, add it (Part 11)
+[ ] In app: Dashboard → tap Start Bot → if error → refresh PAT token (Part 11)
+```
+
+### Monthly check (if on paid plan):
+```
+[ ] Check Render billing at dashboard.render.com/billing — card still valid?
+[ ] Check backend health URL — shows ok?
+[ ] Test the app — can you log in and start the bot?
 ```
 
 ---
 
 ## SECURITY REMINDERS
 
-- NEVER share your SECRET_KEY
-- NEVER share your PAT token (pat_...) — it gives trading access to your account
+- NEVER share your SECRET_KEY with anyone
+- NEVER share your pat_ token — it gives full trading access to your Deriv account
 - NEVER commit .env files to GitHub
-- NEVER switch to REAL account without testing on DEMO for weeks first
-- The bot trades real money if connected to a real account
-- No trading system guarantees profits — always use risk management settings
+- NEVER switch to REAL account until the bot has run on DEMO successfully for weeks
+- No trading system guarantees profits — always set risk management limits
+- The bot trades real money if you switch to Real account — be careful
 
 ---
 
 *Document created: July 2026*
 *Backend URL: https://deriv-trading-platform-mxic.onrender.com*
 *GitHub: https://github.com/Gerald-bit0rgb/deriv-trading-platform*
+*Deriv App ID: 33O8kU94RkSPJmJNahuno*
