@@ -37,9 +37,9 @@ jobs:
         working-directory: frontend
         run: flutter pub get
 
-      - name: Generate code
+      - name: Analyse code
         working-directory: frontend
-        run: dart run build_runner build --delete-conflicting-outputs
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build debug APK
         working-directory: frontend

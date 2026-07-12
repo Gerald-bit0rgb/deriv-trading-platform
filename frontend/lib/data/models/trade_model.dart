@@ -1,49 +1,107 @@
-import 'package:freezed_annotation/freezed_annotation.dart';
+// Simple trade model — no code generation needed
+class TradeModel {
+  final int id;
+  final String? contractId;
+  final String symbol;
+  final String contractType;
+  final double stake;
+  final double? payout;
+  final double? profit;
+  final double? entryPrice;
+  final double? exitPrice;
+  final double? takeProfit;
+  final double? stopLoss;
+  final String status;
+  final bool? isWin;
+  final String? aiSignal;
+  final double? aiConfidence;
+  final String? aiReason;
+  final String source;
+  final DateTime? openedAt;
+  final DateTime? closedAt;
 
-part 'trade_model.freezed.dart';
-part 'trade_model.g.dart';
+  const TradeModel({
+    required this.id,
+    this.contractId,
+    required this.symbol,
+    required this.contractType,
+    required this.stake,
+    this.payout,
+    this.profit,
+    this.entryPrice,
+    this.exitPrice,
+    this.takeProfit,
+    this.stopLoss,
+    this.status = 'open',
+    this.isWin,
+    this.aiSignal,
+    this.aiConfidence,
+    this.aiReason,
+    this.source = 'manual',
+    this.openedAt,
+    this.closedAt,
+  });
 
-@freezed
-class TradeModel with _$TradeModel {
-  const factory TradeModel({
-    required int id,
-    String? contractId,
-    required String symbol,
-    required String contractType,
-    required double stake,
-    double? payout,
-    double? profit,
-    double? entryPrice,
-    double? exitPrice,
-    double? takeProfit,
-    double? stopLoss,
-    @Default('open') String status,
-    bool? isWin,
-    String? aiSignal,
-    double? aiConfidence,
-    String? aiReason,
-    @Default('manual') String source,
-    DateTime? openedAt,
-    DateTime? closedAt,
-  }) = _TradeModel;
-
-  factory TradeModel.fromJson(Map<String, dynamic> json) =>
-      _$TradeModelFromJson(json);
+  factory TradeModel.fromJson(Map<String, dynamic> json) {
+    return TradeModel(
+      id: json['id'] as int? ?? 0,
+      contractId: json['contract_id'] as String?,
+      symbol: json['symbol'] as String? ?? '',
+      contractType: json['contract_type'] as String? ?? '',
+      stake: (json['stake'] as num?)?.toDouble() ?? 0.0,
+      payout: (json['payout'] as num?)?.toDouble(),
+      profit: (json['profit'] as num?)?.toDouble(),
+      entryPrice: (json['entry_price'] as num?)?.toDouble(),
+      exitPrice: (json['exit_price'] as num?)?.toDouble(),
+      takeProfit: (json['take_profit'] as num?)?.toDouble(),
+      stopLoss: (json['stop_loss'] as num?)?.toDouble(),
+      status: json['status'] as String? ?? 'open',
+      isWin: json['is_win'] as bool?,
+      aiSignal: json['ai_signal'] as String?,
+      aiConfidence: (json['ai_confidence'] as num?)?.toDouble(),
+      aiReason: json['ai_reason'] as String?,
+      source: json['source'] as String? ?? 'manual',
+      openedAt: json['opened_at'] != null
+          ? DateTime.tryParse(json['opened_at'] as String)
+          : null,
+      closedAt: json['closed_at'] != null
+          ? DateTime.tryParse(json['closed_at'] as String)
+          : null,
+    );
+  }
 }
 
-@freezed
-class TradeSummary with _$TradeSummary {
-  const factory TradeSummary({
-    @Default(0) int totalTrades,
-    @Default(0) int openTrades,
-    @Default(0) int closedTrades,
-    @Default(0.0) double totalProfit,
-    @Default(0.0) double winRate,
-    @Default(0.0) double lossRate,
-    @Default(0.0) double todayProfit,
-    @Default(0) int todayTrades,
-  }) = _TradeSummary;
+class TradeSummary {
+  final int totalTrades;
+  final int openTrades;
+  final int closedTrades;
+  final double totalProfit;
+  final double winRate;
+  final double lossRate;
+  final double todayProfit;
+  final int todayTrades;
 
-  factory TradeSummary.fromJson(Map<String, dynamic> json) =>
-      _$TradeSummaryFromJson(json);
+  const TradeSummary({
+    this.totalTrades = 0,
+    this.openTrades = 0,
+    this.closedTrades = 0,
+    this.totalProfit = 0.0,
+    this.winRate = 0.0,
+    this.lossRate = 0.0,
+    this.todayProfit = 0.0,
+    this.todayTrades = 0,
+  });
+
+  factory TradeSummary.fromJson(Map<String, dynamic> json) {
+    return TradeSummary(
+      totalTrades: json['total_trades'] as int? ?? 0,
+      openTrades: json['open_trades'] as int? ?? 0,
+      closedTrades: json['closed_trades'] as int? ?? 0,
+      totalProfit: (json['total_profit'] as num?)?.toDouble() ?? 0.0,
+      winRate: (json['win_rate'] as num?)?.toDouble() ?? 0.0,
+      lossRate: (json['loss_rate'] as num?)?.toDouble() ?? 0.0,
+      todayProfit: (json['today_profit'] as num?)?.toDouble() ?? 0.0,
+      todayTrades: json['today_trades'] as int? ?? 0,
+    );
+  }
 }

@@ -1,19 +1,31 @@
-import 'package:freezed_annotation/freezed_annotation.dart';
+// Simple notification model — no code generation needed
+class NotificationModel {
+  final int id;
+  final String type;
+  final String title;
+  final String body;
+  final bool isRead;
+  final DateTime? sentAt;
 
-part 'notification_model.freezed.dart';
-part 'notification_model.g.dart';
+  const NotificationModel({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.body,
+    this.isRead = false,
+    this.sentAt,
+  });
 
-@freezed
-class NotificationModel with _$NotificationModel {
-  const factory NotificationModel({
-    required int id,
-    required String type,
-    required String title,
-    required String body,
-    @Default(false) bool isRead,
-    DateTime? sentAt,
-  }) = _NotificationModel;
-
-  factory NotificationModel.fromJson(Map<String, dynamic> json) =>
-      _$NotificationModelFromJson(json);
+  factory NotificationModel.fromJson(Map<String, dynamic> json) {
+    return NotificationModel(
+      id: json['id'] as int? ?? 0,
+      type: json['type'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      body: json['body'] as String? ?? '',
+      isRead: json['is_read'] as bool? ?? false,
+      sentAt: json['sent_at'] != null
+          ? DateTime.tryParse(json['sent_at'] as String)
+          : null,
+    );
+  }
 }
