@@ -1,4 +1,3 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,16 +15,7 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // Initialise Firebase (for push notifications)
-  // Ignore if not configured — the app works without it
-  try {
-    await Firebase.initializeApp();
-  } catch (_) {
-    // Firebase not configured — push notifications will be disabled
-  }
-
   runApp(
-    // ProviderScope is the root of Riverpod state management
     const ProviderScope(child: DerivTradingApp()),
   );
 }
