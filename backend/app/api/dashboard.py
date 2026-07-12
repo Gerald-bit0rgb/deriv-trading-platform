@@ -6,7 +6,7 @@ GET /api/v1/dashboard — single call that returns everything the dashboard need
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_active_user, get_db
@@ -24,15 +24,6 @@ async def get_dashboard(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Return all data needed to render the main dashboard screen:
-      - Account balance (from Deriv if session active, else None)
-      - Open trades
-      - Today's stats
-      - All-time stats
-      - Bot status
-      - Risk settings summary
-    """
     # ── Live balance ─────────────────────────────────────────────────────────
     balance_data = {"balance": None, "currency": None, "equity": None}
     session = trading_engine.get_session(current_user.id)
@@ -42,10 +33,10 @@ async def get_dashboard(
             balance_data = {
                 "balance": bal.get("balance"),
                 "currency": bal.get("currency"),
-                "equity": bal.get("balance"),  # Deriv doesn't separate equity for binary options
+                "equity": bal.get("balance"),
             }
         except Exception:
-            pass  # fail silently — bot may be connecting
+            pass
 
     # ── Today's summary ───────────────────────────────────────────────────────
     daily = await get_daily_summary(db, current_user.id)
@@ -60,7 +51,7 @@ async def get_dashboard(
     )
     row = result.one()
     total_closed = row.total or 0
-    total_wins   = row.wins or 0
+    total_wins = row.wins or 0
 
     # ── Open trades ───────────────────────────────────────────────────────────
     open_trades = await get_open_trades(db, current_user.id)
@@ -68,21 +59,23 @@ async def get_dashboard(
     # ── Risk settings ─────────────────────────────────────────────────────────
     risk = await get_or_create_risk_settings(db, current_user.id)
 
-    # ── 7-day equity curve (profit per day) ───────────────────────────────────
+    # ── 7-day equity curve ────────────────────────────────────────────────────
+    # Use raw SQL to avoid SQLAlchemy GROUP BY issues with date_trunc
     seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-    day_col = func.date_trunc("day", Trade.closed_at).label("day")
+    equity_sql = text("""
+        SELECT
+            DATE_TRUNC('day', closed_at) AS day,
+            COALESCE(SUM(profit), 0.0) AS day_profit
+        FROM trades
+        WHERE user_id = :user_id
+          AND status = 'closed'
+          AND closed_at >= :since
+        GROUP BY DATE_TRUNC('day', closed_at)
+        ORDER BY DATE_TRUNC('day', closed_at)
+    """)
     equity_result = await db.execute(
-        select(
-            day_col,
-            func.coalesce(func.sum(Trade.profit), 0.0).label("day_profit"),
-        )
-        .where(
-            Trade.user_id == current_user.id,
-            Trade.status == "closed",
-            Trade.closed_at >= seven_days_ago,
-        )
-        .group_by(func.date_trunc("day", Trade.closed_at))
-        .order_by(func.date_trunc("day", Trade.closed_at))
+        equity_sql,
+        {"user_id": current_user.id, "since": seven_days_ago},
     )
     equity_curve = [
         {"date": str(r.day)[:10], "profit": float(r.day_profit)}
@@ -110,7 +103,9 @@ async def get_dashboard(
             "total_trades": total_closed,
             "total_profit": float(row.total_profit or 0),
             "win_rate": (total_wins / total_closed * 100) if total_closed > 0 else 0.0,
-            "loss_rate": ((total_closed - total_wins) / total_closed * 100) if total_closed > 0 else 0.0,
+            "loss_rate": (
+                (total_closed - total_wins) / total_closed * 100
+            ) if total_closed > 0 else 0.0,
         },
         "open_trades": len(open_trades),
         "equity_curve": equity_curve,

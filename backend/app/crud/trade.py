@@ -4,7 +4,7 @@ CRUD operations for the Trade model.
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import Integer, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.trade import Trade
@@ -71,9 +71,7 @@ async def get_daily_summary(db: AsyncSession, user_id: int) -> dict:
         select(
             func.count(Trade.id).label("count"),
             func.coalesce(func.sum(Trade.profit), 0).label("profit"),
-            func.sum(
-                func.cast(Trade.is_win == True, Integer)  # noqa: E712
-            ).label("wins"),
+            func.count(Trade.id).filter(Trade.is_win == True).label("wins"),  # noqa: E712
         ).where(
             Trade.user_id == user_id,
             Trade.status == "closed",
