@@ -70,9 +70,10 @@ async def get_dashboard(
 
     # ── 7-day equity curve (profit per day) ───────────────────────────────────
     seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    day_col = func.date_trunc("day", Trade.closed_at).label("day")
     equity_result = await db.execute(
         select(
-            func.date_trunc("day", Trade.closed_at).label("day"),
+            day_col,
             func.coalesce(func.sum(Trade.profit), 0.0).label("day_profit"),
         )
         .where(
