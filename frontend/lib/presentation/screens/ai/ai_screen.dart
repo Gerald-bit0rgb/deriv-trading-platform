@@ -29,7 +29,16 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       final signal = await ref.read(aiServiceProvider).getSignal(_selectedSymbol);
       setState(() { _signal = signal; _isLoading = false; });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      final msg = e.toString();
+      String friendlyError;
+      if (msg.contains('400') || msg.contains('trading session')) {
+        friendlyError = 'Please start the bot first.\nGo to Dashboard → tap Start Bot, then try again.';
+      } else if (msg.contains('500') || msg.contains('connection')) {
+        friendlyError = 'Server error. Please try again in a moment.';
+      } else {
+        friendlyError = 'Error: $msg';
+      }
+      setState(() { _error = friendlyError; _isLoading = false; });
     }
   }
 

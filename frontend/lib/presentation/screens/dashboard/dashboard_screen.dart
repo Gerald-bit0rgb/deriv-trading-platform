@@ -66,7 +66,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         onRefresh: () async => ref.invalidate(dashboardProvider),
         child: dashAsync.when(
           loading: () => const _DashboardSkeleton(),
-          error: (e, _) => _ErrorView(error: e.toString(), onRetry: () => ref.invalidate(dashboardProvider)),
+          error: (e, _) => _ErrorView(
+            error: e.toString().contains('500')
+                ? 'Server is starting up. Pull down to refresh.'
+                : e.toString().contains('401')
+                    ? 'Session expired. Please log in again.'
+                    : 'Could not load dashboard. Pull down to retry.',
+            onRetry: () => ref.invalidate(dashboardProvider),
+          ),
           data: (data) => _DashboardContent(data: data, botStatus: botStatus),
         ),
       ),
