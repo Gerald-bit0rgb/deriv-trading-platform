@@ -7,27 +7,31 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from app.main import app
+from app.db.init_db import init_db
 
 
 @pytest.mark.asyncio
 async def test_health():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         response = await client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
 
 @pytest.mark.asyncio
-async def test_register_and_login(tmp_path, monkeypatch):
+async def test_register_and_login():
     """
-    Integration smoke-test:  register → login → get /me
-    Uses an in-memory SQLite DB (not Postgres) for speed.
+    Integration smoke-test: register then get /me
+    Uses the real PostgreSQL test database from CI environment.
     """
-    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-    monkeypatch.setenv("SYNC_DATABASE_URL", "sqlite:///:memory:")
-    monkeypatch.setenv("SECRET_KEY", "test-secret-key-that-is-long-enough-for-jwt")
+    # Create all tables before running tests
+    await init_db()
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         # Register
         reg = await client.post("/api/v1/auth/register", json={
             "email": "test@example.com",
