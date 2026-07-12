@@ -43,6 +43,21 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   }
 
   Future<void> _autoTrade() async {
+    // Check bot status first
+    final botStatus = ref.read(botStatusProvider);
+    if (botStatus != 'running') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+            'Bot is not running. Go to Dashboard → tap Start Bot first.',
+          ),
+          backgroundColor: AppColors.warning,
+          duration: Duration(seconds: 4),
+        ));
+      }
+      return;
+    }
+
     setState(() => _isAutoTrading = true);
     try {
       final result = await ref.read(aiServiceProvider).autoTrade(
@@ -62,9 +77,19 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final msg = e.toString();
+        String friendly;
+        if (msg.contains('400') || msg.contains('trading session')) {
+          friendly = 'Bot not running. Go to Dashboard → Start Bot first.';
+        } else if (msg.contains('500')) {
+          friendly = 'Server error. Please try again.';
+        } else {
+          friendly = 'Auto-trade error. Please try again.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Auto-trade error: $e'),
+          content: Text(friendly),
           backgroundColor: AppColors.danger,
+          duration: const Duration(seconds: 4),
         ));
       }
     } finally {
@@ -74,11 +99,39 @@ class _AiScreenState extends ConsumerState<AiScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final botStatus = ref.watch(botStatusProvider);
+    final isRunning = botStatus == 'running';
+
     return Scaffold(
       appBar: AppBar(title: const Text('AI Signal Engine')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // ── Bot status banner ─────────────────────────────────────────────
+          if (!isRunning)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      color: AppColors.warning, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Bot is not running. Go to Dashboard → Start Bot to enable auto-trading.',
+                      style: TextStyle(
+                          color: AppColors.warning, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // ── Symbol picker ────────────────────────────────────────────────
           DropdownButtonFormField<String>(
             value: _selectedSymbol,
