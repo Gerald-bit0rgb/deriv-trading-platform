@@ -55,7 +55,7 @@ async def get_dashboard(
         select(
             func.count(Trade.id).label("total"),
             func.coalesce(func.sum(Trade.profit), 0.0).label("total_profit"),
-            func.sum(func.cast(Trade.is_win.is_(True), func.Integer)).label("wins"),
+            func.count(Trade.id).filter(Trade.is_win == True).label("wins"),  # noqa: E712
         ).where(Trade.user_id == current_user.id, Trade.status == "closed")
     )
     row = result.one()
