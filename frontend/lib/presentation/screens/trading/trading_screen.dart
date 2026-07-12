@@ -69,7 +69,10 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Close failed: $e'), backgroundColor: AppColors.danger),
+          SnackBar(
+            content: Text('Close failed: ${e.toString()}'),
+            backgroundColor: AppColors.danger,
+          ),
         );
       }
     }
@@ -233,18 +236,17 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
                 child: CircularProgressIndicator(color: AppColors.primary),
               ),
             ),
-            error: (e, _) => Text('Error: $e',
-                style: const TextStyle(color: AppColors.danger)),
+            error: (e, _) => const _EmptyState(message: 'No open trades'),
             data: (trades) => trades.isEmpty
-                ? const _EmptyState(message: 'No open trades')
-                : Column(
-                    children: trades
-                        .map((t) => TradeCard(
-                              trade: t,
-                              onClose: () => _closeTrade(t.id),
-                            ))
-                        .toList(),
-                  ),
+              ? const _EmptyState(message: 'No open trades')
+              : Column(
+                  children: trades
+                      .map((t) => TradeCard(
+                            trade: t,
+                            onClose: () => _closeTrade(t.id),
+                          ))
+                      .toList(),
+                ),
           ),
         ],
       ),

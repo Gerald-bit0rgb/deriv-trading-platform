@@ -307,44 +307,74 @@ class _BotControlStrip extends ConsumerWidget {
     final notifier = ref.read(botStatusProvider.notifier);
     final isRunning = botStatus == 'running';
     final isPaused  = botStatus == 'paused';
+    final error     = notifier.lastError;
 
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: isRunning || isPaused
-                ? null
-                : () => notifier.startBot(),
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Start Bot'),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
-          ),
-        ),
-        const SizedBox(width: 8),
-        if (isRunning)
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () => notifier.pauseBot(),
-              icon: const Icon(Icons.pause),
-              label: const Text('Pause'),
+        if (error != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.danger.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.danger.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.error_outline, color: AppColors.danger, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    error,
+                    style: const TextStyle(color: AppColors.danger, fontSize: 12),
+                  ),
+                ),
+              ],
             ),
           ),
-        if (isPaused)
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () => notifier.resumeBot(),
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Resume'),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: isRunning || isPaused
+                    ? null
+                    : () {
+                        notifier.clearError();
+                        notifier.startBot();
+                      },
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Start Bot'),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+              ),
             ),
-          ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: (isRunning || isPaused) ? () => notifier.stopBot() : null,
-            icon: const Icon(Icons.stop),
-            label: const Text('Stop'),
-            style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
-          ),
+            const SizedBox(width: 8),
+            if (isRunning)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => notifier.pauseBot(),
+                  icon: const Icon(Icons.pause),
+                  label: const Text('Pause'),
+                ),
+              ),
+            if (isPaused)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => notifier.resumeBot(),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Resume'),
+                ),
+              ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: (isRunning || isPaused) ? () => notifier.stopBot() : null,
+                icon: const Icon(Icons.stop),
+                label: const Text('Stop'),
+                style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+              ),
+            ),
+          ],
         ),
       ],
     );
