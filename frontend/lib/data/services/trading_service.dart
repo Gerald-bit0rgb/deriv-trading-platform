@@ -13,8 +13,17 @@ class TradingService {
   TradingService(this._dio);
 
   // ── Bot control ────────────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> startBot() async {
-    final r = await _dio.post('/trading/start');
+  Future<Map<String, dynamic>> startBot({
+    String symbol = 'R_100',
+    String accountType = 'demo',
+  }) async {
+    final r = await _dio.post(
+      '/trading/start',
+      queryParameters: {
+        'symbol': symbol,
+        'account_type': accountType,
+      },
+    );
     return r.data as Map<String, dynamic>;
   }
 

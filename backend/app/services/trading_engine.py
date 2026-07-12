@@ -53,12 +53,16 @@ class UserSession:
         username: str,
         fcm_token: Optional[str],
         db_factory,
+        symbol: str = "R_100",
+        account_type: str = "demo",
     ):
         self.user_id = user_id
         self.api_token = api_token
         self.username = username
         self.fcm_token = fcm_token
         self.db_factory = db_factory
+        self.symbol = symbol
+        self.account_type = account_type
         self.client: Optional[DerivClient] = None
         self.status: BotStatus = BotStatus.STOPPED
         self.monitor_task: Optional[asyncio.Task] = None
@@ -95,6 +99,8 @@ async def start_trading_with_token(
     username: str,
     fcm_token: Optional[str],
     db_factory,
+    symbol: str = "R_100",
+    account_type: str = "demo",
 ) -> str:
     session = _sessions.get(user_id)
 
@@ -105,8 +111,14 @@ async def start_trading_with_token(
             username=username,
             fcm_token=fcm_token,
             db_factory=db_factory,
+            symbol=symbol,
+            account_type=account_type,
         )
         _sessions[user_id] = session
+    else:
+        # Update symbol and account_type if bot restarts with new settings
+        session.symbol = symbol
+        session.account_type = account_type
 
     if session.status == BotStatus.RUNNING:
         return BotStatus.RUNNING
@@ -227,7 +239,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
 
     # ── Check for new 15M bar ─────────────────────────────────────────────────
     try:
-        candles = await session.client.get_candles(DEFAULT_SYMBOL, granularity=900, count=2)
+        candles = await session.client.get_candles(session.symbol, granularity=900, count=2)
         if not candles:
             return
         current_bar_epoch = int(candles[-2].get("epoch", 0))
@@ -266,7 +278,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
 
     # ── Step 2: Run AI analysis ────────────────────────────────────────────────
     try:
-        signal = await engine.analyse(DEFAULT_SYMBOL, granularity=60)
+        signal = await engine.analyse(session.symbol, granularity=60)
     except Exception as e:
         logger.warning("strategy.analysis_failed", error=str(e))
         return
@@ -342,7 +354,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
 
     try:
         contract = await session.client.buy_contract(
-            symbol=DEFAULT_SYMBOL,
+            symbol=session.symbol,
             contract_type=contract_type,
             stake=stake,
             duration=5,
@@ -353,7 +365,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
             db,
             user_id=session.user_id,
             contract_id=str(contract.get("contract_id")),
-            symbol=DEFAULT_SYMBOL,
+            symbol=session.symbol,
             contract_type=contract_type,
             duration=5,
             duration_unit="t",
@@ -371,7 +383,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
         await _send_notif(
             session, db, "trade_open",
             f"Auto Trade Opened — {signal.signal}",
-            f"{contract_type} on {DEFAULT_SYMBOL} | Stake: ${stake} | "
+            f"{contract_type} on {session.symbol} | Stake: ${stake} | "
             f"Confidence: {int(signal.confidence * 100)}%",
         )
 

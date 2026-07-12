@@ -39,9 +39,10 @@ logger = get_logger(__name__)
 async def start_bot(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
+    symbol: str = "R_100",
+    account_type: str = "demo",
 ):
     """Start the automated trading bot for the current user."""
-    # Read the token while the session is still open
     api_token = current_user.deriv_api_token
     user_id = current_user.id
 
@@ -51,16 +52,19 @@ async def start_bot(
             detail="No Deriv API token saved. Go to Profile and save your Deriv token first.",
         )
 
-    # Pass a plain token string — not the ORM object
     new_status = await trading_engine.start_trading_with_token(
         user_id=user_id,
         api_token=api_token,
         username=current_user.username,
         fcm_token=current_user.fcm_token,
         db_factory=async_session_factory,
+        symbol=symbol,
+        account_type=account_type,
     )
-    logger.info("trading.start_requested", user_id=user_id, status=new_status)
-    return {"status": new_status, "message": "Trading bot started"}
+    logger.info("trading.start_requested", user_id=user_id, status=new_status,
+                symbol=symbol, account_type=account_type)
+    return {"status": new_status, "message": "Trading bot started",
+            "symbol": symbol, "account_type": account_type}
 
 
 @router.post("/pause")
