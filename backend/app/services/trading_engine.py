@@ -16,7 +16,6 @@ Settings (read from user's RiskSettings):
   daily_profit_target → basket close USD target
 """
 import asyncio
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -248,10 +247,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
     # ── Step 1: Basket profit check → close all if target reached ─────────────
     if basket_count > 0:
         total_profit = await _get_basket_profit(session, open_trades)
-        basket_close_target = risk.daily_profit_target / 100.0
-        # Use $0.40 as default if daily_profit_target is large (not configured for basket)
-        # The user can set daily_profit_target in cents equivalent
-        # We map: daily_profit_target / 250 ≈ basket close in USD for small accounts
+        # Basket close target: max of $0.40 or 4x the default stake
         basket_close_usd = max(0.40, risk.default_stake * 4)
 
         if total_profit >= basket_close_usd:
