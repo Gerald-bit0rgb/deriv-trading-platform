@@ -36,6 +36,7 @@ Last updated: July 2026
 14. All important links
 15. Environment variables reference
 16. Quick renewal checklist
+17. **MOVING TO A NEW RENDER ACCOUNT — Full Guide**
 
 ---
 
@@ -729,3 +730,466 @@ These go in Render → deriv-trading-backend → Environment tab.
 *Backend URL: https://deriv-trading-platform-mxic.onrender.com*
 *GitHub: https://github.com/Gerald-bit0rgb/deriv-trading-platform*
 *Deriv App ID: 33O8kU94RkSPJmJNahuno*
+
+---
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PART 17 — MOVING TO A NEW RENDER ACCOUNT
+# Complete guide — attaching your GitHub repo to a brand new Render account
+# ═══════════════════════════════════════════════════════════════
+
+## When would you do this?
+
+- You want to move to a different email or Render account
+- Your current Render account has billing or access issues
+- You are setting up on a completely new device
+- You want to give someone else their own copy of the backend
+- Your current free database expired and you want a clean start
+
+---
+
+## WHAT TO PREPARE BEFORE YOU START
+
+Have all of these ready in Notepad before you begin.
+If any are missing, find them using the instructions next to each one.
+
+```
+1. GitHub repo URL (never changes):
+   https://github.com/Gerald-bit0rgb/deriv-trading-platform
+
+2. SECRET_KEY — your long random string
+   Where to find it: Render → old service → Environment → SECRET_KEY
+   If you cannot find it, generate a new one (warning below):
+   python -c "import secrets; print(secrets.token_hex(64))"
+   WARNING: a new SECRET_KEY logs out ALL existing app users
+
+3. Deriv App ID (never expires):
+   33O8kU94RkSPJmJNahuno
+   Where to find it: https://developers.deriv.com → Registered Apps
+
+4. Deriv PAT token
+   Where to find it: https://developers.deriv.com → API Tokens
+   If yours is old, create a new one — see Part 5 of this guide
+
+5. Your Render database URL (if reusing old database)
+   Where to find it: Render → your database → Connections → Internal Database URL
+   OR create a brand new database in Step 2 below
+```
+
+---
+
+## STEP 1 — CREATE THE NEW RENDER ACCOUNT
+
+1. Open your browser and go to: **https://render.com**
+2. Click **"Get Started for Free"**
+3. Click **"Sign up with GitHub"**
+
+   ![Sign up screen — click the GitHub button]
+
+4. A GitHub authorisation page opens
+5. Click **"Authorize Render"**
+6. You are now inside the new Render dashboard
+7. The account is linked to your GitHub — your repos are visible
+
+---
+
+## STEP 2 — CREATE THE DATABASE
+
+You must create the database BEFORE the web service.
+The web service needs the database URL when you set it up.
+
+### 2a — Open the new database form
+1. In the Render dashboard click the **"New +"** button (top right corner)
+2. A dropdown appears — click **"PostgreSQL"**
+
+### 2b — Fill in the settings
+
+| Field | What to type |
+|-------|-------------|
+| Name | `deriv-trading-db` |
+| Database | `deriv_trading` |
+| User | `deriv_user` |
+| Region | **Oregon (US West)** — important: same region as web service |
+| PostgreSQL Version | Leave as default |
+| Plan | Free (testing) or Starter ($7/month — never expires) |
+
+Leave all other fields empty or as default.
+
+### 2c — Create and wait
+1. Click **"Create Database"**
+2. Wait 1-2 minutes
+3. The status badge changes to **green "Available"**
+
+### 2d — Copy the database URL
+
+This is the most important step — do not skip it.
+
+1. Click on your database to open it
+2. Scroll down until you see the section called **"Connections"**
+3. You will see several URL options
+4. Find **"Internal Database URL"** — this is the one you need
+5. It looks exactly like this:
+   ```
+   postgresql://deriv_user:AbCdEfGhIjKl@dpg-xxxxxxxxxxxxxxxxxx-a/deriv_trading
+   ```
+6. Click the **copy icon** next to it
+7. Paste it in Notepad
+
+### 2e — Make two versions of the URL
+
+You need two versions for two different environment variables.
+
+Take the URL you copied and create:
+
+**Version 1 — for DATABASE_URL**
+Change `postgresql://` to `postgresql+asyncpg://` at the very start:
+```
+postgresql+asyncpg://deriv_user:AbCdEfGhIjKl@dpg-xxxxxxxxxxxxxxxxxx-a/deriv_trading
+```
+
+**Version 2 — for SYNC_DATABASE_URL**
+Keep exactly as copied — do not change anything:
+```
+postgresql://deriv_user:AbCdEfGhIjKl@dpg-xxxxxxxxxxxxxxxxxx-a/deriv_trading
+```
+
+Save both versions in Notepad. You will paste them in Step 4.
+
+---
+
+## STEP 3 — CREATE THE WEB SERVICE
+
+### 3a — Start a new web service
+1. Click **"New +"** (top right)
+2. Click **"Web Service"**
+
+### 3b — Connect your GitHub repo
+1. The page asks "How would you like to deploy?"
+2. Click **"Build and deploy from a Git repository"**
+3. You will see a list of your GitHub repos
+4. Find **"deriv-trading-platform"** and click **"Connect"**
+
+If you do not see your repo:
+- Click **"Configure account"**
+- Select your GitHub account
+- Tick the checkbox next to `deriv-trading-platform`
+- Click **"Save"**
+- Go back and click Connect
+
+### 3c — Fill in the service settings
+
+| Field | What to type |
+|-------|-------------|
+| Name | `deriv-trading-backend` |
+| Region | **Oregon (US West)** — must match the database region |
+| Branch | `main` |
+| Runtime | **Docker** — this is important, select Docker not Python |
+| Root Directory | leave empty |
+| Instance Type | Free or Starter |
+
+---
+
+## STEP 4 — ADD ALL ENVIRONMENT VARIABLES
+
+This is where the backend gets its configuration.
+You must add every single variable — missing even one will break things.
+
+Scroll down to the **"Environment Variables"** section.
+Click **"Add Environment Variable"** for each row in the table below.
+
+### Complete table of all 12 variables:
+
+| Key | Value | How to get it |
+|-----|-------|--------------|
+| `APP_ENV` | `production` | Type exactly as shown |
+| `DEBUG` | `false` | Type exactly as shown |
+| `SECRET_KEY` | your long random string | From Notepad (old key or newly generated) |
+| `ALGORITHM` | `HS256` | Type exactly as shown |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Type exactly as shown |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Type exactly as shown |
+| `DATABASE_URL` | `postgresql+asyncpg://...` | Version 1 from Step 2e |
+| `SYNC_DATABASE_URL` | `postgresql://...` | Version 2 from Step 2e |
+| `DERIV_APP_ID` | `33O8kU94RkSPJmJNahuno` | Your App ID — does not change |
+| `DERIV_WS_URL` | `wss://ws.derivws.com/websockets/v3` | Type exactly as shown |
+| `CORS_ORIGINS` | `https://deriv-trading-backend.onrender.com` | Update after deploy if URL is different |
+| `LOG_LEVEL` | `INFO` | Type exactly as shown |
+
+### Detailed explanation of where to find each value:
+
+**SECRET_KEY**
+- Best option: use the same key from your old Render account
+  - Go to old Render account → your service → Environment → copy the SECRET_KEY value
+- If you cannot access the old account: generate a new one:
+  ```
+  python -c "import secrets; print(secrets.token_hex(64))"
+  ```
+- If you generate a new key: all existing users will be logged out of the app
+- The key must be at least 32 characters long
+
+**DATABASE_URL**
+- This is Version 1 from Step 2e above
+- Must start with `postgresql+asyncpg://`
+- The password in the middle is random — copy it exactly
+
+**SYNC_DATABASE_URL**
+- This is Version 2 from Step 2e above
+- Must start with `postgresql://` (no +asyncpg)
+- The password must be the same as in DATABASE_URL
+
+**DERIV_APP_ID**
+- Your existing App ID: `33O8kU94RkSPJmJNahuno`
+- This never changes and never expires
+- If you cannot find it: go to https://developers.deriv.com → Registered Apps → copy from the table
+
+**CORS_ORIGINS**
+- You do not know the exact URL yet at this step
+- For now type: `https://deriv-trading-backend.onrender.com`
+- After deployment you will get the real URL and update this if needed (Step 7)
+
+---
+
+## STEP 5 — DEPLOY THE SERVICE
+
+1. Scroll to the very bottom of the page
+2. Click the big blue button **"Create Web Service"**
+3. The service starts deploying — you are taken to the logs page
+
+### What to watch for in the logs:
+```
+==> Cloning from https://github.com/Gerald-bit0rgb/deriv-trading-platform...   ✓ done
+==> Building Docker image...
+==> Successfully built image
+==> Starting service...
+INFO:     Application startup complete.                                          ← this line means success
+```
+
+- The green badge at the top changes to **"Live"**
+- This takes 5-10 minutes the first time
+- If it says "Deploy failed" — check the logs for red error lines
+
+---
+
+## STEP 6 — GET YOUR NEW BACKEND URL
+
+After the service is live:
+
+1. Look at the top of the service page
+2. Your URL is shown under the service name
+3. It looks like one of these:
+   ```
+   https://deriv-trading-backend.onrender.com
+   ```
+   or with a random suffix:
+   ```
+   https://deriv-trading-backend-xxxx.onrender.com
+   ```
+4. Copy this URL — you need it in the next steps
+
+---
+
+## STEP 7 — UPDATE CORS_ORIGINS IF URL IS DIFFERENT
+
+If your new URL is different from what you typed in Step 4:
+
+1. Click the **"Environment"** tab on your service page
+2. Find the row for **CORS_ORIGINS**
+3. Click the **pencil/edit icon** on that row
+4. Delete the old value
+5. Type your actual new URL (from Step 6)
+6. Click **"Save Changes"**
+7. Render redeploys automatically — wait for **"Live"**
+
+---
+
+## STEP 8 — TEST THE BACKEND IS WORKING
+
+Open your browser and go to your health check URL:
+```
+https://YOUR-NEW-URL.onrender.com/health
+```
+
+You must see exactly this response:
+```json
+{"status":"ok","service":"Deriv AI Trading Platform"}
+```
+
+If you see that — your backend is fully working on the new account.
+
+If you see an error:
+- Wait 30 seconds and try again (service may still be waking up)
+- Check the Logs tab on Render for red error lines
+- Most common cause: DATABASE_URL is wrong — check it has +asyncpg
+
+---
+
+## STEP 9 — UPDATE THE FLUTTER APP WITH THE NEW URL
+
+Only do this step if your new Render URL is different from the old one.
+
+If the URL is the same as before — skip this step.
+
+### How to check if it changed:
+- Old URL: `https://deriv-trading-platform-mxic.onrender.com`
+- New URL: whatever you got in Step 6
+- If they are different → follow the steps below
+
+### How to update it:
+1. On your VPS open Command Prompt
+2. Open the constants file in Notepad:
+   ```
+   notepad C:\Users\Administrator\deriv-trading-platform\frontend\lib\core\constants\app_constants.dart
+   ```
+3. Find this line:
+   ```dart
+   defaultValue: 'https://deriv-trading-platform-mxic.onrender.com',
+   ```
+4. Change the URL to your new one — keep the quotes and comma
+5. Save the file (Ctrl+S)
+6. Push to GitHub:
+   ```
+   cd C:\Users\Administrator\deriv-trading-platform
+   git add .
+   git commit -m "Update backend URL for new Render account"
+   git push origin main
+   ```
+7. GitHub Actions builds a new APK automatically (10-15 minutes)
+8. Go to GitHub → Actions tab → download the new APK from Artifacts
+9. Send to phone and install (replaces old version)
+
+---
+
+## STEP 10 — SET UP THE APP ON YOUR PHONE
+
+Since you have a brand new database, all old accounts are gone.
+You need to create a new account in the app.
+
+1. Open **Deriv AI Trader** on your phone
+2. Tap **Sign Up**
+3. Enter your details:
+   - Email: your email address
+   - Username: choose any name (min 3 characters)
+   - Password: must have uppercase + number + min 8 chars (example: Gerald2024!)
+4. Tap **Create Account**
+5. You land on the Dashboard
+
+6. Go to **Profile** tab
+7. Scroll to **Deriv API Token** section
+8. Paste your `pat_` token
+9. Tap **Save Token**
+10. Green message = success
+
+11. Go to **Risk** settings → set your limits
+12. Go to **Dashboard** → select your trading pair → tap **Change**
+13. Make sure Account Type shows **DEMO**
+14. Tap **Start Bot**
+15. Wait 10-15 seconds → status shows **RUNNING**
+
+---
+
+## COMPLETE CHECKLIST FOR MOVING TO NEW RENDER ACCOUNT
+
+Print this or save it. Tick each box as you complete it.
+
+```
+PREPARATION
+[ ] Have GitHub repo URL ready: https://github.com/Gerald-bit0rgb/deriv-trading-platform
+[ ] Have SECRET_KEY ready (from old Render or newly generated)
+[ ] Have Deriv App ID ready: 33O8kU94RkSPJmJNahuno
+[ ] Have Deriv PAT token ready (from developers.deriv.com)
+
+STEP 1 — NEW RENDER ACCOUNT
+[ ] Created new account at render.com
+[ ] Signed up with GitHub
+[ ] Authorized Render to access GitHub
+
+STEP 2 — DATABASE
+[ ] Clicked New + → PostgreSQL
+[ ] Filled in: Name=deriv-trading-db, Database=deriv_trading, User=deriv_user
+[ ] Region set to Oregon
+[ ] Database status shows Available
+[ ] Copied Internal Database URL
+[ ] Created Version 1 (DATABASE_URL) — starts with postgresql+asyncpg://
+[ ] Created Version 2 (SYNC_DATABASE_URL) — starts with postgresql://
+[ ] Both versions saved in Notepad
+
+STEP 3 — WEB SERVICE
+[ ] Clicked New + → Web Service
+[ ] Connected to deriv-trading-platform GitHub repo
+[ ] Name set to: deriv-trading-backend
+[ ] Region set to: Oregon
+[ ] Runtime set to: Docker (not Python)
+[ ] Branch set to: main
+
+STEP 4 — ENVIRONMENT VARIABLES (all 12 must be added)
+[ ] APP_ENV = production
+[ ] DEBUG = false
+[ ] SECRET_KEY = [your key]
+[ ] ALGORITHM = HS256
+[ ] ACCESS_TOKEN_EXPIRE_MINUTES = 60
+[ ] REFRESH_TOKEN_EXPIRE_DAYS = 30
+[ ] DATABASE_URL = postgresql+asyncpg://... [from Step 2]
+[ ] SYNC_DATABASE_URL = postgresql://... [from Step 2]
+[ ] DERIV_APP_ID = 33O8kU94RkSPJmJNahuno
+[ ] DERIV_WS_URL = wss://ws.derivws.com/websockets/v3
+[ ] CORS_ORIGINS = https://[your-service-url].onrender.com
+[ ] LOG_LEVEL = INFO
+
+STEP 5 — DEPLOY
+[ ] Clicked Create Web Service
+[ ] Logs show: Application startup complete.
+[ ] Status shows: Live (green)
+
+STEP 6 — GET URL
+[ ] Copied new backend URL from service page
+
+STEP 7 — UPDATE CORS
+[ ] Updated CORS_ORIGINS with actual URL if it was different
+
+STEP 8 — TEST
+[ ] Opened https://[new-url].onrender.com/health
+[ ] Response shows: {"status":"ok"}
+
+STEP 9 — UPDATE APP (only if URL changed)
+[ ] Updated app_constants.dart with new URL
+[ ] Pushed to GitHub
+[ ] New APK downloaded from Actions → Artifacts
+[ ] New APK installed on phone
+
+STEP 10 — APP SETUP
+[ ] Registered new account in app
+[ ] Saved Deriv PAT token in Profile
+[ ] Set Risk settings
+[ ] Selected trading pair
+[ ] Account type set to DEMO
+[ ] Start Bot works — status shows RUNNING
+```
+
+---
+
+## THINGS THAT STAY THE SAME WHEN MOVING ACCOUNTS
+
+These do not change — no action needed:
+
+| Item | Where it lives | Changes? |
+|------|---------------|---------|
+| Your code | GitHub repo | Never changes |
+| Deriv App ID | developers.deriv.com | Never expires |
+| Deriv PAT token | In the app | Same token works anywhere |
+| ALGORITHM value | Type manually | Always HS256 |
+| DERIV_WS_URL value | Type manually | Never changes |
+| LOG_LEVEL value | Type manually | Always INFO |
+
+## THINGS THAT CHANGE WHEN MOVING ACCOUNTS
+
+| Item | Why it changes | What to do |
+|------|---------------|-----------|
+| Database URL | New database = new URL and password | Create new DB, copy new URL |
+| Backend URL | New service may have different subdomain | Update CORS_ORIGINS and app_constants.dart |
+| All user accounts | Stored in database, lost with old DB | Register again in the app |
+| All trade history | Stored in database, lost with old DB | Starts fresh |
+
+---
+
+*End of Part 17*
