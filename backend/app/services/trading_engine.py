@@ -11,7 +11,6 @@ Responsibilities:
   - Emit notifications on key events
 """
 import asyncio
-from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional
 

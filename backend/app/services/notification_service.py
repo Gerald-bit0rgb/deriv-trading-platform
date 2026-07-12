@@ -31,17 +31,16 @@ def _init_firebase() -> bool:
 
     try:
         import firebase_admin
-        from firebase_admin import credentials, messaging
+        from firebase_admin import credentials as fb_credentials
 
         creds_json = base64.b64decode(creds_b64).decode("utf-8")
         creds_dict = json.loads(creds_json)
 
-        # Write to a temp file — firebase_admin requires a file path or dict
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(creds_dict, f)
             tmp_path = f.name
 
-        cred = credentials.Certificate(tmp_path)
+        cred = fb_credentials.Certificate(tmp_path)
         firebase_admin.initialize_app(cred)
         os.unlink(tmp_path)
         _firebase_initialised = True
@@ -69,7 +68,6 @@ async def send_push_notification(
         return False
 
     try:
-        import firebase_admin
         from firebase_admin import messaging
 
         message = messaging.Message(
