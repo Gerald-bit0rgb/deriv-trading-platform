@@ -5,7 +5,7 @@ Uses bcrypt directly instead of passlib to avoid the 72-byte bug.
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from jose import JWTError, jwt
+from jose import jwt
 
 from app.core.config import settings
 
@@ -16,7 +16,6 @@ from app.core.config import settings
 
 def hash_password(plain: str) -> str:
     """Return a bcrypt hash of the password."""
-    # bcrypt limit is 72 bytes — truncate to be safe
     password_bytes = plain.encode("utf-8")[:72]
     salt = bcrypt.gensalt(rounds=12)
     hashed = bcrypt.hashpw(password_bytes, salt)

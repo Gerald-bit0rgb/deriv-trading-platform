@@ -3,7 +3,6 @@ AI signal routes.
 
 GET  /api/v1/ai/signal/{symbol}       — get a trading signal for one symbol
 POST /api/v1/ai/signal/batch          — signals for multiple symbols
-GET  /api/v1/ai/analyse/{symbol}      — full technical analysis
 POST /api/v1/ai/auto-trade/{symbol}   — let the AI decide and execute the trade
 """
 from typing import List
@@ -13,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_active_user, get_db
 from app.models.user import User
-from app.schemas.ai import AISignalResponse, MarketAnalysis
+from app.schemas.ai import AISignalResponse
 from app.services import trading_engine
 from app.services.ai_engine import AIEngine
 from app.core.logging import get_logger
@@ -39,11 +38,7 @@ async def get_signal(
     granularity: int = Query(60, description="Candle granularity in seconds"),
     current_user: User = Depends(get_current_active_user),
 ):
-    """
-    Generate a BUY / SELL / WAIT signal for *symbol*.
-
-    Requires an active trading session.
-    """
+    """Generate a BUY / SELL / WAIT signal for *symbol*. Requires an active trading session."""
     engine = _get_ai_engine(current_user.id)
     signal = await engine.analyse(symbol, granularity=granularity)
 
@@ -111,10 +106,7 @@ async def ai_auto_trade(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Ask the AI to analyse the market and automatically execute a trade
-    if it produces a BUY or SELL signal above the confidence threshold.
-    """
+    """Ask the AI to analyse and automatically execute a trade if confident enough."""
     engine = _get_ai_engine(current_user.id)
     signal = await engine.analyse(symbol, granularity=granularity)
 
@@ -127,7 +119,6 @@ async def ai_auto_trade(
             "message": "AI decided to WAIT — no trade placed",
         }
 
-    # Map signal direction to Deriv contract type
     contract_type = "CALL" if signal.signal == "BUY" else "PUT"
 
     try:

@@ -31,7 +31,7 @@ def _init_firebase() -> bool:
 
     try:
         import firebase_admin
-        from firebase_admin import credentials
+        from firebase_admin import credentials, messaging
 
         creds_json = base64.b64decode(creds_b64).decode("utf-8")
         creds_dict = json.loads(creds_json)

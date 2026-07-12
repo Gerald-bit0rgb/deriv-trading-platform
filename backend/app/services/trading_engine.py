@@ -11,7 +11,7 @@ Responsibilities:
   - Emit notifications on key events
 """
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional
 
@@ -32,8 +32,8 @@ logger = get_logger(__name__)
 class BotStatus(str, Enum):
     STOPPED = "stopped"
     RUNNING = "running"
-    PAUSED  = "paused"
-    ERROR   = "error"
+    PAUSED = "paused"
+    ERROR = "error"
 
 
 class UserSession:

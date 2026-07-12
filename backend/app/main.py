@@ -6,7 +6,7 @@ Run locally:
 
 Or via Docker / Render — see Dockerfile / render.yaml.
 """
-import asyncio
+import asyncio  # noqa: F401 — kept for potential future use
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status

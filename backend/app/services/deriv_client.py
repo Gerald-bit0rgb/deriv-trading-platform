@@ -11,8 +11,7 @@ Features:
 """
 import asyncio
 import json
-import time
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 
 import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException

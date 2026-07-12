@@ -14,7 +14,7 @@ GET    /api/v1/trading/trades/{id}     — get a single trade
 GET    /api/v1/trading/summary         — daily trade summary
 GET    /api/v1/trading/balance         — live account balance from Deriv
 """
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,6 @@ from app.crud.trade import get_open_trades, get_trade_by_id, get_trade_history, 
 from app.models.user import User
 from app.schemas.trade import TradeCreate, TradeResponse, TradeSummary
 from app.services import trading_engine
-from app.services.trading_engine import BotStatus
 from app.db.session import async_session_factory
 from app.core.logging import get_logger
 

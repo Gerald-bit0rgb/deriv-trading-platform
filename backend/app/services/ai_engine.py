@@ -150,18 +150,18 @@ def _detect_pattern(opens: np.ndarray, closes: np.ndarray, highs: np.ndarray, lo
     if len(closes) < 3:
         return None
 
-    o, c, h, l = opens[-1], closes[-1], highs[-1], lows[-1]
-    po, pc = opens[-2], closes[-2]       # previous candle
+    o, c, h, low = opens[-1], closes[-1], highs[-1], lows[-1]
+    po, pc = opens[-2], closes[-2]
     body = abs(c - o)
     prev_body = abs(pc - po)
-    candle_range = h - l
+    candle_range = h - low
 
     # Doji — body is < 10% of the total range
     if candle_range > 0 and body / candle_range < 0.1:
         return "Doji"
 
     # Hammer — small body at the top, long lower wick
-    lower_wick = min(o, c) - l
+    lower_wick = min(o, c) - low
     upper_wick = h - max(o, c)
     if lower_wick > 2 * body and upper_wick < body:
         return "Hammer (Bullish)"
@@ -246,31 +246,39 @@ class AIEngine:
 
         # RSI  (weight 0.25)
         if rsi_val < 30:
-            score += 0.25; reasons.append(f"RSI oversold ({rsi_val:.1f})")
+            score += 0.25
+            reasons.append(f"RSI oversold ({rsi_val:.1f})")
         elif rsi_val > 70:
-            score -= 0.25; reasons.append(f"RSI overbought ({rsi_val:.1f})")
+            score -= 0.25
+            reasons.append(f"RSI overbought ({rsi_val:.1f})")
 
         # MACD crossover  (weight 0.25)
         if macd_hist > 0 and macd_val > macd_sig:
-            score += 0.25; reasons.append("MACD bullish crossover")
+            score += 0.25
+            reasons.append("MACD bullish crossover")
         elif macd_hist < 0 and macd_val < macd_sig:
-            score -= 0.25; reasons.append("MACD bearish crossover")
+            score -= 0.25
+            reasons.append("MACD bearish crossover")
 
         # EMA trend  (weight 0.20)
         if ema_20 > ema_50 and current_price > ema_20:
-            score += 0.20; reasons.append("Price above EMA20 > EMA50")
+            score += 0.20
+            reasons.append("Price above EMA20 > EMA50")
         elif ema_20 < ema_50 and current_price < ema_20:
-            score -= 0.20; reasons.append("Price below EMA20 < EMA50")
+            score -= 0.20
+            reasons.append("Price below EMA20 < EMA50")
 
         # Bollinger Bands  (weight 0.20)
         if current_price < bb_lower:
-            score += 0.20; reasons.append("Price below lower Bollinger Band")
+            score += 0.20
+            reasons.append("Price below lower Bollinger Band")
         elif current_price > bb_upper:
-            score -= 0.20; reasons.append("Price above upper Bollinger Band")
+            score -= 0.20
+            reasons.append("Price above upper Bollinger Band")
 
         # ADX trend strength filter  (weight 0.10)
         if adx_val < 20:
-            score *= 0.5   # dampen signal in ranging market
+            score *= 0.5
             reasons.append(f"Weak trend (ADX {adx_val:.1f}) — signal reduced")
         else:
             reasons.append(f"Trend strength: ADX {adx_val:.1f}")
@@ -279,9 +287,11 @@ class AIEngine:
         pattern = _detect_pattern(opens, closes, highs, lows)
         if pattern:
             if "Bullish" in pattern or "Hammer" in pattern or "Morning" in pattern:
-                score += 0.10; reasons.append(f"Pattern: {pattern}")
+                score += 0.10
+                reasons.append(f"Pattern: {pattern}")
             elif "Bearish" in pattern or "Shooting" in pattern:
-                score -= 0.10; reasons.append(f"Pattern: {pattern}")
+                score -= 0.10
+                reasons.append(f"Pattern: {pattern}")
 
         # ── Volatility classification ─────────────────────────────────────────
         atr_pct = (atr_val / current_price) * 100

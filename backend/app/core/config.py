@@ -7,7 +7,6 @@ Never hardcode secrets — use environment variables.
 from functools import lru_cache
 from typing import List
 
-from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,15 +23,15 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    # ── Database ──────────────────────────────────────────────────────────────
-    DATABASE_URL: str          # asyncpg driver for async operations
-    SYNC_DATABASE_URL: str     # psycopg2 driver for Alembic migrations
+    # ── Database ─────────────────────────────────────────────────────────────
+    DATABASE_URL: str
+    SYNC_DATABASE_URL: str
 
     # ── Deriv API ────────────────────────────────────────────────────────────
     DERIV_APP_ID: int = 1
     DERIV_WS_URL: str = "wss://ws.derivws.com/websockets/v3"
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
+    # ── CORS ─────────────────────────────────────────────────────────────────
     CORS_ORIGINS: str = "http://localhost"
 
     @property
@@ -43,7 +42,7 @@ class Settings(BaseSettings):
     # ── Firebase ─────────────────────────────────────────────────────────────
     FIREBASE_CREDENTIALS_BASE64: str = ""
 
-    # ── Logging ───────────────────────────────────────────────────────────────
+    # ── Logging ──────────────────────────────────────────────────────────────
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
 
@@ -61,5 +60,4 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Convenience shortcut used throughout the app
 settings = get_settings()
