@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URL: str
 
     # ── Deriv API ────────────────────────────────────────────────────────────
-    DERIV_APP_ID: int = 1
+    DERIV_APP_ID: str = "1"
     DERIV_WS_URL: str = "wss://ws.derivws.com/websockets/v3"
 
     # ── CORS ─────────────────────────────────────────────────────────────────
