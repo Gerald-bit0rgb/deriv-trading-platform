@@ -49,7 +49,7 @@ dependencies:
   logger: ^2.4.0
   equatable: ^2.0.5
   freezed_annotation: ^2.4.1
-  json_annotation: ^4.9.0
+  json_annotation: ^4.8.1
   connectivity_plus: ^6.0.3
 
 dev_dependencies:
@@ -58,8 +58,8 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   build_runner: ^2.4.11
   riverpod_generator: ^2.4.3
-  freezed: ^2.5.2
-  json_serializable: ^6.8.0
+  freezed: ^2.4.7
+  json_serializable: ^6.7.1
   retrofit_generator: ^8.1.0
 
 flutter:
