@@ -231,6 +231,103 @@ class _DashboardContent extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Balance Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BalanceCard extends StatelessWidget {
+  final double? balance;
+  final String currency;
+  final String botStatus;
+
+  const _BalanceCard({
+    this.balance,
+    required this.currency,
+    required this.botStatus,
+  });
+
+  Color get _statusColor {
+    switch (botStatus) {
+      case 'running':
+        return AppColors.success;
+      case 'paused':
+        return AppColors.warning;
+      case 'error':
+        return AppColors.danger;
+      default:
+        return AppColors.textMuted;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.primary, AppColors.primaryDark],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Account Balance',
+                  style: TextStyle(color: Colors.white70, fontSize: 14)),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _statusColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      botStatus.toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            balance != null ? Fmt.money(balance) : '—',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(currency,
+              style: const TextStyle(color: Colors.white60, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Account Type Switcher (Demo / Real)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -379,14 +476,6 @@ class _TypeBadge extends StatelessWidget {
 
 class _BotSymbolSelector extends ConsumerWidget {
   const _BotSymbolSelector();
-
-  // Group name helper
-  static String _groupName(String symbol) {
-    if (symbol.startsWith('1HZ')) return 'Volatility (1s)';
-    if (symbol.startsWith('JD'))  return 'Jump Index';
-    if (symbol.startsWith('R_'))  return 'Volatility';
-    return 'Forex';
-  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
