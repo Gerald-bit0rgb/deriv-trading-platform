@@ -1,16 +1,24 @@
 """
-AI Trading Signal Engine.
+AI Trading Signal Engine — MA Bias Basket Strategy
 
-Architecture (designed to be upgraded to a trained ML model later):
+Strategy logic (ported from MA_Bias_Basket_EA.mq5):
 
-  1. Fetch recent candle data from Deriv
-  2. Compute technical indicators (RSI, MACD, Bollinger Bands, EMA, ATR, ADX)
-  3. Detect candlestick/chart patterns
-  4. Combine signals using a weighted rule-based decision engine
-  5. Output: BUY | SELL | WAIT  with a confidence score and human-readable reason
+  BIAS (4H timeframe):
+    - EMA(5, Close) > EMA(13, Close) AND ADX(14) >= 20 → BULLISH bias
+    - EMA(5, Close) < EMA(13, Close) AND ADX(14) >= 20 → BEARISH bias
 
-The engine is intentionally modular so each step can be replaced with a
-trained scikit-learn / TensorFlow model without changing the external API.
+  ENTRY (15M timeframe):
+    - EMA(5, Typical) > SMA(50, Typical) AND last candle closed ABOVE EMA(5) → BUY trigger
+    - EMA(5, Typical) < SMA(50, Typical) AND last candle closed BELOW EMA(5) → SELL trigger
+
+  SIGNAL:
+    - BULLISH bias + BUY trigger  → BUY
+    - BEARISH bias + SELL trigger → SELL
+    - Any mismatch                → WAIT
+
+  EMERGENCY EXIT signal:
+    - BUY basket open + candle closes below SMA20 or SMA50 → close signal
+    - SELL basket open + candle closes above SMA20 or SMA50 → close signal
 """
 import asyncio
 from dataclasses import dataclass, field
@@ -23,6 +31,7 @@ from app.core.logging import get_logger
 from app.services.deriv_client import DerivClient
 
 logger = get_logger(__name__)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data structures
@@ -43,12 +52,12 @@ class Signal:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Technical indicators (pure NumPy — no pandas required for small arrays)
+# Technical indicator helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _ema(prices: np.ndarray, period: int) -> np.ndarray:
     """Exponential Moving Average."""
-    k = 2 / (period + 1)
+    k = 2.0 / (period + 1)
     ema = np.zeros_like(prices)
     ema[0] = prices[0]
     for i in range(1, len(prices)):
@@ -56,245 +65,209 @@ def _ema(prices: np.ndarray, period: int) -> np.ndarray:
     return ema
 
 
-def _rsi(closes: np.ndarray, period: int = 14) -> float:
-    """Relative Strength Index (last value)."""
-    if len(closes) < period + 1:
-        return 50.0
-    deltas = np.diff(closes)
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
-    avg_gain = np.mean(gains[-period:])
-    avg_loss = np.mean(losses[-period:])
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+def _sma(prices: np.ndarray, period: int) -> np.ndarray:
+    """Simple Moving Average."""
+    result = np.full_like(prices, np.nan)
+    for i in range(period - 1, len(prices)):
+        result[i] = np.mean(prices[i - period + 1: i + 1])
+    return result
 
 
-def _macd(closes: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[float, float, float]:
-    """
-    MACD line, signal line, histogram (last values).
-    Returns (macd, signal, histogram).
-    """
-    if len(closes) < slow + signal:
-        return 0.0, 0.0, 0.0
-    ema_fast = _ema(closes, fast)
-    ema_slow = _ema(closes, slow)
-    macd_line = ema_fast - ema_slow
-    signal_line = _ema(macd_line, signal)
-    histogram = macd_line - signal_line
-    return float(macd_line[-1]), float(signal_line[-1]), float(histogram[-1])
-
-
-def _bollinger_bands(closes: np.ndarray, period: int = 20, std_dev: float = 2.0) -> Tuple[float, float, float]:
-    """
-    Returns (upper_band, middle_band, lower_band) — last values.
-    """
-    if len(closes) < period:
-        mid = float(closes[-1])
-        return mid, mid, mid
-    window = closes[-period:]
-    mid = float(np.mean(window))
-    std = float(np.std(window))
-    return mid + std_dev * std, mid, mid - std_dev * std
-
-
-def _atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> float:
-    """Average True Range — measure of volatility."""
-    if len(closes) < 2:
-        return 0.0
-    tr = np.maximum(
-        highs[1:] - lows[1:],
-        np.maximum(
-            np.abs(highs[1:] - closes[:-1]),
-            np.abs(lows[1:] - closes[:-1]),
-        ),
-    )
-    return float(np.mean(tr[-period:])) if len(tr) >= period else float(np.mean(tr))
+def _typical_price(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray) -> np.ndarray:
+    """Typical Price = (High + Low + Close) / 3"""
+    return (highs + lows + closes) / 3.0
 
 
 def _adx(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> float:
     """
-    Simplified Average Directional Index (trend strength 0–100).
-    Values above 25 indicate a trending market.
+    Average Directional Index — trend strength (0-100).
+    Values >= 20 indicate a trending market.
     """
-    if len(closes) < period + 1:
-        return 20.0
-    plus_dm = np.maximum(highs[1:] - highs[:-1], 0)
-    minus_dm = np.maximum(lows[:-1] - lows[1:], 0)
-    # Zero out where the other direction is larger
-    mask = plus_dm < minus_dm
-    plus_dm[mask] = 0
-    mask2 = minus_dm <= plus_dm
-    minus_dm[mask2] = 0
+    if len(closes) < period + 2:
+        return 15.0
+
+    plus_dm = np.maximum(highs[1:] - highs[:-1], 0.0)
+    minus_dm = np.maximum(lows[:-1] - lows[1:], 0.0)
+
+    mask_plus = plus_dm < minus_dm
+    plus_dm[mask_plus] = 0.0
+    mask_minus = minus_dm <= plus_dm
+    minus_dm[mask_minus] = 0.0
 
     tr = np.maximum(highs[1:] - lows[1:], np.abs(highs[1:] - closes[:-1]))
     tr = np.maximum(tr, np.abs(lows[1:] - closes[:-1]))
 
-    tr_s = np.mean(tr[-period:])
-    if tr_s == 0:
-        return 20.0
+    tr_smooth = np.mean(tr[-period:])
+    if tr_smooth == 0:
+        return 15.0
 
-    di_plus = 100 * np.mean(plus_dm[-period:]) / tr_s
-    di_minus = 100 * np.mean(minus_dm[-period:]) / tr_s
-    dx = 100 * abs(di_plus - di_minus) / (di_plus + di_minus + 1e-9)
+    di_plus = 100.0 * np.mean(plus_dm[-period:]) / tr_smooth
+    di_minus = 100.0 * np.mean(minus_dm[-period:]) / tr_smooth
+    denom = di_plus + di_minus
+    if denom == 0:
+        return 15.0
+
+    dx = 100.0 * abs(di_plus - di_minus) / denom
     return float(dx)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Pattern detection
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _detect_pattern(opens: np.ndarray, closes: np.ndarray, highs: np.ndarray, lows: np.ndarray) -> Optional[str]:
-    """Detect the most recent candlestick pattern."""
-    if len(closes) < 3:
-        return None
-
-    o, c, h, low = opens[-1], closes[-1], highs[-1], lows[-1]
-    po, pc = opens[-2], closes[-2]
-    body = abs(c - o)
-    prev_body = abs(pc - po)
-    candle_range = h - low
-
-    # Doji — body is < 10% of the total range
-    if candle_range > 0 and body / candle_range < 0.1:
-        return "Doji"
-
-    # Hammer — small body at the top, long lower wick
-    lower_wick = min(o, c) - low
-    upper_wick = h - max(o, c)
-    if lower_wick > 2 * body and upper_wick < body:
-        return "Hammer (Bullish)"
-
-    # Shooting star — small body at the bottom, long upper wick
-    if upper_wick > 2 * body and lower_wick < body:
-        return "Shooting Star (Bearish)"
-
-    # Bullish engulfing
-    if pc > po and c > o and c > po and o < pc:
-        return "Bullish Engulfing"
-
-    # Bearish engulfing
-    if pc < po and c < o and c < po and o > pc:
-        return "Bearish Engulfing"
-
-    # Morning star (3-candle)
-    if len(closes) >= 3:
-        o2, c2 = opens[-3], closes[-3]
-        if c2 < o2 and abs(pc - po) < prev_body * 0.3 and c > o:
-            return "Morning Star (Bullish)"
-
-    return None
+def _atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> float:
+    """Average True Range — volatility measure."""
+    if len(closes) < 2:
+        return 0.0
+    tr = np.maximum(
+        highs[1:] - lows[1:],
+        np.maximum(np.abs(highs[1:] - closes[:-1]), np.abs(lows[1:] - closes[:-1])),
+    )
+    return float(np.mean(tr[-period:])) if len(tr) >= period else float(np.mean(tr))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Signal generator
+# MA Bias Basket AI Engine
 # ─────────────────────────────────────────────────────────────────────────────
 
 class AIEngine:
     """
-    Rule-based signal engine with a weighted scoring system.
+    MA Bias Basket strategy ported from MQL5 to Python.
 
-    Scores range from -1.0 (strong SELL) to +1.0 (strong BUY).
-    Scores between -threshold and +threshold produce WAIT.
+    Bias timeframe  : 4H  (EMA5/EMA13 on Close + ADX14 >= 20)
+    Entry timeframe : 15M (EMA5 vs SMA50 on Typical Price + candle close position)
+    Exit monitor    : 15M SMA20 and SMA50 for emergency exit signals
     """
 
-    BUY_THRESHOLD  = 0.35
-    SELL_THRESHOLD = -0.35
+    # Strategy parameters (matching the MQL5 EA defaults)
+    BIAS_FAST_PERIOD = 5
+    BIAS_SLOW_PERIOD = 13
+    ADX_PERIOD = 14
+    ADX_THRESHOLD = 20.0
+
+    ENTRY_FAST_PERIOD = 5    # EMA on Typical Price
+    ENTRY_SLOW_PERIOD = 50   # SMA on Typical Price
+    EXIT_SMA_PERIOD = 20     # SMA20 for emergency exit
 
     def __init__(self, client: DerivClient):
         self.client = client
 
     async def analyse(self, symbol: str, granularity: int = 60) -> Signal:
         """
-        Full market analysis for *symbol*.
+        Full MA Bias Basket analysis for *symbol*.
 
-        :param granularity: candle size in seconds.
+        Fetches both 4H and 15M candles then applies the strategy logic.
+        granularity parameter is kept for API compatibility but we fetch
+        both required timeframes internally.
         """
+        # Fetch 4H candles (granularity = 14400 seconds)
         try:
-            candles = await self.client.get_candles(symbol, granularity=granularity, count=100)
+            candles_4h = await self.client.get_candles(
+                symbol, granularity=14400, count=100
+            )
         except Exception as e:
-            logger.error("ai_engine.candle_fetch_failed", symbol=symbol, error=str(e))
-            return Signal(symbol=symbol, signal="WAIT", confidence=0.0,
-                          reason="Unable to fetch market data", trend="SIDEWAYS",
-                          volatility="UNKNOWN")
+            logger.error("ai_engine.4h_fetch_failed", symbol=symbol, error=str(e))
+            return self._wait_signal(symbol, "Unable to fetch 4H market data")
 
-        if len(candles) < 30:
-            return Signal(symbol=symbol, signal="WAIT", confidence=0.0,
-                          reason="Insufficient candle data", trend="SIDEWAYS",
-                          volatility="UNKNOWN")
+        # Fetch 15M candles (granularity = 900 seconds)
+        try:
+            candles_15m = await self.client.get_candles(
+                symbol, granularity=900, count=100
+            )
+        except Exception as e:
+            logger.error("ai_engine.15m_fetch_failed", symbol=symbol, error=str(e))
+            return self._wait_signal(symbol, "Unable to fetch 15M market data")
 
-        opens  = np.array([float(c["open"])  for c in candles])
-        highs  = np.array([float(c["high"])  for c in candles])
-        lows   = np.array([float(c["low"])   for c in candles])
-        closes = np.array([float(c["close"]) for c in candles])
+        if len(candles_4h) < 30 or len(candles_15m) < 60:
+            return self._wait_signal(symbol, "Insufficient candle data")
 
-        current_price = closes[-1]
+        # ── 4H arrays ────────────────────────────────────────────────────────
+        closes_4h = np.array([float(c["close"]) for c in candles_4h])
+        highs_4h  = np.array([float(c["high"])  for c in candles_4h])
+        lows_4h   = np.array([float(c["low"])   for c in candles_4h])
 
-        # ── Compute indicators ────────────────────────────────────────────────
-        rsi_val = _rsi(closes)
-        macd_val, macd_sig, macd_hist = _macd(closes)
-        bb_upper, bb_mid, bb_lower = _bollinger_bands(closes)
-        ema_20 = _ema(closes, 20)[-1]
-        ema_50 = _ema(closes, 50)[-1] if len(closes) >= 50 else ema_20
-        atr_val = _atr(highs, lows, closes)
-        adx_val = _adx(highs, lows, closes)
+        # ── 15M arrays ───────────────────────────────────────────────────────
+        opens_15m  = np.array([float(c["open"])  for c in candles_15m])
+        closes_15m = np.array([float(c["close"]) for c in candles_15m])
+        highs_15m  = np.array([float(c["high"])  for c in candles_15m])
+        lows_15m   = np.array([float(c["low"])   for c in candles_15m])
 
-        # ── Scoring ───────────────────────────────────────────────────────────
-        score = 0.0
-        reasons: List[str] = []
+        typical_15m = _typical_price(highs_15m, lows_15m, closes_15m)
 
-        # RSI  (weight 0.25)
-        if rsi_val < 30:
-            score += 0.25
-            reasons.append(f"RSI oversold ({rsi_val:.1f})")
-        elif rsi_val > 70:
-            score -= 0.25
-            reasons.append(f"RSI overbought ({rsi_val:.1f})")
+        # ── 4H indicators ─────────────────────────────────────────────────────
+        ema5_4h  = _ema(closes_4h, self.BIAS_FAST_PERIOD)
+        ema13_4h = _ema(closes_4h, self.BIAS_SLOW_PERIOD)
+        adx_4h   = _adx(highs_4h, lows_4h, closes_4h, self.ADX_PERIOD)
 
-        # MACD crossover  (weight 0.25)
-        if macd_hist > 0 and macd_val > macd_sig:
-            score += 0.25
-            reasons.append("MACD bullish crossover")
-        elif macd_hist < 0 and macd_val < macd_sig:
-            score -= 0.25
-            reasons.append("MACD bearish crossover")
+        # Use second-to-last bar (last CLOSED bar — same as MQL5 index 1)
+        bias_fast = ema5_4h[-2]
+        bias_slow = ema13_4h[-2]
 
-        # EMA trend  (weight 0.20)
-        if ema_20 > ema_50 and current_price > ema_20:
-            score += 0.20
-            reasons.append("Price above EMA20 > EMA50")
-        elif ema_20 < ema_50 and current_price < ema_20:
-            score -= 0.20
-            reasons.append("Price below EMA20 < EMA50")
+        # ── 4H Bias determination ─────────────────────────────────────────────
+        adx_ok = adx_4h >= self.ADX_THRESHOLD
+        bias_bull = bias_fast > bias_slow and adx_ok
+        bias_bear = bias_fast < bias_slow and adx_ok
 
-        # Bollinger Bands  (weight 0.20)
-        if current_price < bb_lower:
-            score += 0.20
-            reasons.append("Price below lower Bollinger Band")
-        elif current_price > bb_upper:
-            score -= 0.20
-            reasons.append("Price above upper Bollinger Band")
+        # ── 15M indicators ───────────────────────────────────────────────────
+        ema5_15m  = _ema(typical_15m, self.ENTRY_FAST_PERIOD)
+        sma50_15m = _sma(typical_15m, self.ENTRY_SLOW_PERIOD)
+        sma20_15m = _sma(typical_15m, self.EXIT_SMA_PERIOD)
 
-        # ADX trend strength filter  (weight 0.10)
-        if adx_val < 20:
-            score *= 0.5
-            reasons.append(f"Weak trend (ADX {adx_val:.1f}) — signal reduced")
+        # Last closed 15M bar
+        entry_fast  = ema5_15m[-2]
+        entry_slow  = sma50_15m[-2]
+        sma20_last  = sma20_15m[-2]
+        close_15m_last = closes_15m[-2]
+
+        # ── Entry triggers ───────────────────────────────────────────────────
+        price_above_fast = close_15m_last > entry_fast
+        price_below_fast = close_15m_last < entry_fast
+
+        buy_trigger  = (entry_fast > entry_slow) and price_above_fast
+        sell_trigger = (entry_fast < entry_slow) and price_below_fast
+
+        # ── Final signal ─────────────────────────────────────────────────────
+        if bias_bull and buy_trigger:
+            signal = "BUY"
+            reasons = [
+                f"4H EMA{self.BIAS_FAST_PERIOD}({bias_fast:.5f}) > EMA{self.BIAS_SLOW_PERIOD}({bias_slow:.5f}) — BULLISH bias",
+                f"ADX({adx_4h:.1f}) >= {self.ADX_THRESHOLD} — trend confirmed",
+                f"15M EMA{self.ENTRY_FAST_PERIOD}({entry_fast:.5f}) > SMA{self.ENTRY_SLOW_PERIOD}({entry_slow:.5f})",
+                f"15M candle closed above EMA{self.ENTRY_FAST_PERIOD} ({close_15m_last:.5f})",
+            ]
+            confidence = self._calc_confidence(adx_4h, bias_fast, bias_slow, entry_fast, entry_slow)
+            trend = "BULLISH"
+
+        elif bias_bear and sell_trigger:
+            signal = "SELL"
+            reasons = [
+                f"4H EMA{self.BIAS_FAST_PERIOD}({bias_fast:.5f}) < EMA{self.BIAS_SLOW_PERIOD}({bias_slow:.5f}) — BEARISH bias",
+                f"ADX({adx_4h:.1f}) >= {self.ADX_THRESHOLD} — trend confirmed",
+                f"15M EMA{self.ENTRY_FAST_PERIOD}({entry_fast:.5f}) < SMA{self.ENTRY_SLOW_PERIOD}({entry_slow:.5f})",
+                f"15M candle closed below EMA{self.ENTRY_FAST_PERIOD} ({close_15m_last:.5f})",
+            ]
+            confidence = self._calc_confidence(adx_4h, bias_slow, bias_fast, entry_slow, entry_fast)
+            trend = "BEARISH"
+
         else:
-            reasons.append(f"Trend strength: ADX {adx_val:.1f}")
+            # Build WAIT reasons
+            reasons = []
+            if not adx_ok:
+                reasons.append(f"ADX({adx_4h:.1f}) < {self.ADX_THRESHOLD} — trend too weak")
+            if not bias_bull and not bias_bear:
+                reasons.append("4H EMAs are too close — no clear bias")
+            if bias_bull and not buy_trigger:
+                reasons.append("4H is bullish but 15M entry not confirmed yet")
+            if bias_bear and not sell_trigger:
+                reasons.append("4H is bearish but 15M entry not confirmed yet")
+            if not reasons:
+                reasons.append("Bias and entry timeframes do not align")
 
-        # ── Pattern detection ─────────────────────────────────────────────────
-        pattern = _detect_pattern(opens, closes, highs, lows)
-        if pattern:
-            if "Bullish" in pattern or "Hammer" in pattern or "Morning" in pattern:
-                score += 0.10
-                reasons.append(f"Pattern: {pattern}")
-            elif "Bearish" in pattern or "Shooting" in pattern:
-                score -= 0.10
-                reasons.append(f"Pattern: {pattern}")
+            signal = "WAIT"
+            confidence = 0.0
+            trend = "BULLISH" if bias_fast > bias_slow else "BEARISH" if bias_fast < bias_slow else "SIDEWAYS"
 
-        # ── Volatility classification ─────────────────────────────────────────
-        atr_pct = (atr_val / current_price) * 100
+        # ── Volatility ───────────────────────────────────────────────────────
+        atr = _atr(highs_15m, lows_15m, closes_15m)
+        current_price = closes_15m[-1]
+        atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
+
         if atr_pct > 2.0:
             volatility = "HIGH"
         elif atr_pct > 0.8:
@@ -302,45 +275,76 @@ class AIEngine:
         else:
             volatility = "LOW"
 
-        # ── Trend ─────────────────────────────────────────────────────────────
-        if ema_20 > ema_50:
-            trend = "BULLISH"
-        elif ema_20 < ema_50:
-            trend = "BEARISH"
-        else:
-            trend = "SIDEWAYS"
+        # ── Emergency exit note ──────────────────────────────────────────────
+        pattern = None
+        if signal == "BUY" or (signal == "WAIT" and bias_bull):
+            if close_15m_last < sma20_last or close_15m_last < entry_slow:
+                pattern = "Emergency Exit: Close < SMA20 or SMA50"
+        elif signal == "SELL" or (signal == "WAIT" and bias_bear):
+            if close_15m_last > sma20_last or close_15m_last > entry_slow:
+                pattern = "Emergency Exit: Close > SMA20 or SMA50"
 
-        # ── Final decision ────────────────────────────────────────────────────
-        confidence = min(abs(score), 1.0)
-
-        if score >= self.BUY_THRESHOLD:
-            decision = "BUY"
-        elif score <= self.SELL_THRESHOLD:
-            decision = "SELL"
-        else:
-            decision = "WAIT"
-
-        reason_text = "; ".join(reasons) if reasons else "Mixed signals — no clear direction"
+        reason_text = "; ".join(reasons)
 
         logger.info(
             "ai_engine.signal",
             symbol=symbol,
-            signal=decision,
+            signal=signal,
             confidence=round(confidence, 3),
-            score=round(score, 3),
+            adx=round(adx_4h, 1),
+            bias="BULL" if bias_bull else "BEAR" if bias_bear else "FLAT",
             trend=trend,
             volatility=volatility,
         )
 
         return Signal(
             symbol=symbol,
-            signal=decision,
+            signal=signal,
             confidence=round(confidence, 3),
             reason=reason_text,
             trend=trend,
             volatility=volatility,
             pattern=pattern,
             entry_price=current_price,
+        )
+
+    def _calc_confidence(
+        self,
+        adx: float,
+        fast_bias: float,
+        slow_bias: float,
+        fast_entry: float,
+        slow_entry: float,
+    ) -> float:
+        """
+        Confidence score based on:
+        - How far apart the bias EMAs are (stronger separation = higher confidence)
+        - ADX strength (stronger trend = higher confidence)
+        - How far entry EMAs are separated
+        """
+        # Bias separation score (0-0.4)
+        bias_sep = abs(fast_bias - slow_bias) / slow_bias if slow_bias != 0 else 0
+        bias_score = min(bias_sep * 100, 0.4)
+
+        # ADX score (0-0.4): ADX 20=0.0, ADX 40=0.4
+        adx_score = min((adx - self.ADX_THRESHOLD) / 50.0, 0.4)
+        adx_score = max(adx_score, 0.0)
+
+        # Entry separation score (0-0.2)
+        entry_sep = abs(fast_entry - slow_entry) / slow_entry if slow_entry != 0 else 0
+        entry_score = min(entry_sep * 100, 0.2)
+
+        total = bias_score + adx_score + entry_score
+        return min(round(total, 3), 1.0)
+
+    def _wait_signal(self, symbol: str, reason: str) -> Signal:
+        return Signal(
+            symbol=symbol,
+            signal="WAIT",
+            confidence=0.0,
+            reason=reason,
+            trend="SIDEWAYS",
+            volatility="UNKNOWN",
         )
 
     async def batch_analyse(self, symbols: List[str], granularity: int = 60) -> Dict[str, Signal]:
@@ -351,10 +355,7 @@ class AIEngine:
         for symbol, result in zip(symbols, results):
             if isinstance(result, Exception):
                 logger.error("ai_engine.batch_error", symbol=symbol, error=str(result))
-                output[symbol] = Signal(
-                    symbol=symbol, signal="WAIT", confidence=0.0,
-                    reason=str(result), trend="SIDEWAYS", volatility="UNKNOWN"
-                )
+                output[symbol] = self._wait_signal(symbol, str(result))
             else:
                 output[symbol] = result
         return output
