@@ -18,13 +18,16 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # ─────────────────────────────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
-    """Return a bcrypt hash of *plain*."""
-    return pwd_context.hash(plain)
+    """Return a bcrypt hash of *plain*. Truncates to 72 bytes (bcrypt limit)."""
+    # bcrypt has a 72-byte limit — truncate safely before hashing
+    truncated = plain.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+    return pwd_context.hash(truncated)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     """Return True if *plain* matches *hashed*."""
-    return pwd_context.verify(plain, hashed)
+    truncated = plain.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+    return pwd_context.verify(truncated, hashed)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -104,18 +104,16 @@ logger = get_logger("app")
 async def generic_exception_handler(request: Request, exc: Exception):
     import traceback
     error_detail = str(exc)
-    error_trace = traceback.format_exc()
     logger.error(
         "unhandled_exception",
         path=request.url.path,
         method=request.method,
         error=error_detail,
-        traceback=error_trace,
+        traceback=traceback.format_exc(),
     )
-    # Show real error so we can debug
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": error_detail, "type": type(exc).__name__},
+        content={"detail": "An internal server error occurred"},
     )
 
 
