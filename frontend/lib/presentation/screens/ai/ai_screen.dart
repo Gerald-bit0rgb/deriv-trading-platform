@@ -6,6 +6,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../data/models/ai_signal_model.dart';
+import '../../../data/providers/dashboard_provider.dart';
 import '../../../data/services/ai_service.dart';
 
 class AiScreen extends ConsumerStatefulWidget {
