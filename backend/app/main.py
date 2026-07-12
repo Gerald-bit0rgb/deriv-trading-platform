@@ -82,7 +82,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,16 +102,20 @@ logger = get_logger("app")
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
+    import traceback
+    error_detail = str(exc)
+    error_trace = traceback.format_exc()
     logger.error(
         "unhandled_exception",
         path=request.url.path,
         method=request.method,
-        error=str(exc),
-        exc_info=True,
+        error=error_detail,
+        traceback=error_trace,
     )
+    # Show real error so we can debug
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "An internal server error occurred"},
+        content={"detail": error_detail, "type": type(exc).__name__},
     )
 
 
