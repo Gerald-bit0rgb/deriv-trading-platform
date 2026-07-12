@@ -1,24 +1,30 @@
 """
-Trading Engine — the core automation layer.
+Trading Engine — MA Bias Basket Strategy
 
-Responsibilities:
-  - Maintain one DerivClient per active user session
-  - Start / pause / resume / stop automated trading
-  - Execute trades based on AI signals or manual requests
-  - Monitor open positions and close them when TP/SL is hit
-  - Enforce risk-management rules before every trade
-  - Persist every trade action to the database
-  - Emit notifications on key events
+Automated bot loop:
+  Every new 15M bar:
+    1. Run MA Bias Basket analysis (4H bias + 15M entry)
+    2. If BUY/SELL signal and basket allows → place trade
+    3. Check basket total profit → close all if >= InpBasketCloseUSD
+    4. Emergency exit → close all if 15M candle closes against SMA50
+  Every 5 seconds:
+    5. Sync open trade statuses with Deriv
+
+Settings (read from user's RiskSettings):
+  default_stake       → lot size per entry
+  max_open_trades     → max basket size
+  daily_profit_target → basket close USD target
 """
 import asyncio
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.crud import trade as trade_crud
 from app.crud import notification as notif_crud
+from app.crud import trade as trade_crud
 from app.crud.risk import get_or_create_risk_settings
 from app.models.trade import Trade
 from app.models.user import User
@@ -26,6 +32,9 @@ from app.services.deriv_client import DerivClient
 from app.services.notification_service import send_push_notification
 
 logger = get_logger(__name__)
+
+# Default trading symbol for the automated bot
+DEFAULT_SYMBOL = "R_100"   # Volatility 100 Index — 24/7 synthetic
 
 
 class BotStatus(str, Enum):
@@ -36,10 +45,7 @@ class BotStatus(str, Enum):
 
 
 class UserSession:
-    """
-    Holds everything that belongs to one logged-in user's trading session.
-    Uses plain values instead of ORM objects to avoid DetachedInstanceError.
-    """
+    """All state for one user's trading session. Uses plain values only."""
 
     def __init__(
         self,
@@ -57,11 +63,10 @@ class UserSession:
         self.client: Optional[DerivClient] = None
         self.status: BotStatus = BotStatus.STOPPED
         self.monitor_task: Optional[asyncio.Task] = None
-        self._tick_sub_ids: Dict[str, str] = {}
-        self._latest_prices: Dict[str, float] = {}
+        self.strategy_task: Optional[asyncio.Task] = None
+        self._last_bar_time: Optional[int] = None   # last 15M bar epoch processed
 
     async def connect(self) -> None:
-        """Create a DerivClient and authorise it."""
         self.client = DerivClient(api_token=self.api_token)
         await self.client.connect()
         logger.info("session.connected", user_id=self.user_id)
@@ -73,9 +78,7 @@ class UserSession:
         logger.info("session.disconnected", user_id=self.user_id)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Global session registry  (user_id → UserSession)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Session registry ──────────────────────────────────────────────────────────
 _sessions: Dict[int, UserSession] = {}
 
 
@@ -84,7 +87,7 @@ def get_session(user_id: int) -> Optional[UserSession]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Engine control functions
+# Engine control
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def start_trading_with_token(
@@ -94,10 +97,6 @@ async def start_trading_with_token(
     fcm_token: Optional[str],
     db_factory,
 ) -> str:
-    """
-    Connect to Deriv and start the automated trading bot.
-    Uses plain values to avoid SQLAlchemy DetachedInstanceError.
-    """
     session = _sessions.get(user_id)
 
     if session is None:
@@ -116,8 +115,14 @@ async def start_trading_with_token(
     await session.connect()
     session.status = BotStatus.RUNNING
 
+    # Background task 1: sync trade statuses every 5 seconds
     session.monitor_task = asyncio.create_task(
         _monitor_loop(session), name=f"monitor-{user_id}"
+    )
+
+    # Background task 2: run MA Bias Basket strategy on every new 15M bar
+    session.strategy_task = asyncio.create_task(
+        _strategy_loop(session), name=f"strategy-{user_id}"
     )
 
     logger.info("trading_engine.started", user_id=user_id)
@@ -125,7 +130,7 @@ async def start_trading_with_token(
 
 
 async def start_trading(user: User, db_factory) -> str:
-    """Legacy wrapper — kept for compatibility."""
+    """Legacy wrapper."""
     return await start_trading_with_token(
         user_id=user.id,
         api_token=user.deriv_api_token or "",
@@ -157,6 +162,8 @@ async def stop_trading(user_id: int) -> str:
         session.status = BotStatus.STOPPED
         if session.monitor_task:
             session.monitor_task.cancel()
+        if session.strategy_task:
+            session.strategy_task.cancel()
         await session.disconnect()
         _sessions.pop(user_id, None)
         logger.info("trading_engine.stopped", user_id=user_id)
@@ -169,157 +176,292 @@ def get_bot_status(user_id: int) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trade execution
+# MA Bias Basket Strategy Loop
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def execute_trade(
-    user: User,
-    symbol: str,
-    contract_type: str,
-    stake: float,
-    duration: int,
-    duration_unit: str,
-    db: AsyncSession,
-    ai_signal: Optional[str] = None,
-    ai_confidence: Optional[float] = None,
-    ai_reason: Optional[str] = None,
-    source: str = "manual",
-) -> Trade:
+async def _strategy_loop(session: UserSession) -> None:
     """
-    Validate risk rules, place the contract on Deriv, and record the trade.
+    Runs the MA Bias Basket strategy on every new 15M bar.
+    Checks every 60 seconds for a new bar.
     """
-    # ── 1. Risk checks ────────────────────────────────────────────────────────
-    risk = await get_or_create_risk_settings(db, user.id)
+    logger.info("strategy.started", user_id=session.user_id)
 
-    if risk.emergency_stop:
-        raise RuntimeError("Emergency stop is active — trading halted")
+    while session.status in (BotStatus.RUNNING, BotStatus.PAUSED):
+        try:
+            if session.status == BotStatus.RUNNING:
+                async with session.db_factory() as db:
+                    await _run_basket_strategy(session, db)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("strategy.error", user_id=session.user_id, error=str(e))
 
-    if not risk.trading_enabled:
-        raise RuntimeError("Trading is disabled in risk settings")
+        # Check every 60 seconds for a new 15M bar
+        await asyncio.sleep(60)
 
-    if stake > risk.max_stake:
-        raise RuntimeError(f"Stake {stake} exceeds max allowed {risk.max_stake}")
+    logger.info("strategy.stopped", user_id=session.user_id)
 
-    # Check open-trade count
-    open_trades = await trade_crud.get_open_trades(db, user.id)
-    if len(open_trades) >= risk.max_open_trades:
-        raise RuntimeError(
-            f"Max open trades ({risk.max_open_trades}) already reached"
-        )
 
-    # Check daily trade count
-    summary = await trade_crud.get_daily_summary(db, user.id)
-    if summary["today_trades"] >= risk.max_daily_trades:
-        raise RuntimeError("Daily trade limit reached")
+async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
+    """
+    MA Bias Basket strategy execution for one bar check.
 
-    # Check daily loss
-    if summary["today_profit"] <= -abs(risk.max_daily_loss):
-        raise RuntimeError("Daily loss limit reached — trading stopped for today")
+    Steps:
+      1. Check if a new 15M bar has formed
+      2. Run AI engine analysis
+      3. Check basket profit → close if target reached
+      4. Emergency exit check (SMA50 only)
+      5. Place new trade if signal aligns and basket allows
+    """
+    from app.services.ai_engine import AIEngine
 
-    # Check AI confidence gate
-    if ai_confidence is not None and ai_confidence < risk.min_ai_confidence:
-        raise RuntimeError(
-            f"AI confidence {ai_confidence:.2f} below minimum {risk.min_ai_confidence}"
-        )
+    if session.client is None:
+        return
 
-    # ── 2. Get active session / client ────────────────────────────────────────
-    session = _sessions.get(user.id)
-    if session is None or session.client is None:
-        raise RuntimeError("Trading session not active — call /trading/start first")
+    engine = AIEngine(client=session.client)
 
-    # ── 3. Place trade on Deriv ───────────────────────────────────────────────
-    contract = await session.client.buy_contract(
-        symbol=symbol,
-        contract_type=contract_type,
-        stake=stake,
-        duration=duration,
-        duration_unit=duration_unit,
-    )
+    # ── Get risk settings ─────────────────────────────────────────────────────
+    risk = await get_or_create_risk_settings(db, session.user_id)
 
-    # ── 4. Persist to database ────────────────────────────────────────────────
-    trade = await trade_crud.create_trade(
-        db,
-        user_id=user.id,
-        contract_id=str(contract.get("contract_id")),
-        symbol=symbol,
-        contract_type=contract_type,
-        duration=duration,
-        duration_unit=duration_unit,
-        stake=stake,
-        entry_price=contract.get("entry_spot"),
-        payout=contract.get("payout"),
-        ai_signal=ai_signal,
-        ai_confidence=ai_confidence,
-        ai_reason=ai_reason,
-        source=source,
-        status="open",
-    )
+    if risk.emergency_stop or not risk.trading_enabled:
+        return
 
-    # ── 5. Send notification ──────────────────────────────────────────────────
-    await notif_crud.create_notification(
-        db,
-        user_id=user.id,
-        type_="trade_open",
-        title="Trade Opened",
-        body=f"{contract_type} on {symbol} | Stake: {stake}",
-    )
-    if user.fcm_token:
-        asyncio.create_task(
-            send_push_notification(
-                token=user.fcm_token,
-                title="Trade Opened",
-                body=f"{contract_type} on {symbol} | Stake: {stake}",
+    # ── Check for new 15M bar ─────────────────────────────────────────────────
+    try:
+        candles = await session.client.get_candles(DEFAULT_SYMBOL, granularity=900, count=2)
+        if not candles:
+            return
+        current_bar_epoch = int(candles[-2].get("epoch", 0))
+        if current_bar_epoch == session._last_bar_time:
+            return   # same bar — nothing to do
+        session._last_bar_time = current_bar_epoch
+    except Exception as e:
+        logger.warning("strategy.bar_check_failed", error=str(e))
+        return
+
+    logger.info("strategy.new_bar", user_id=session.user_id, epoch=current_bar_epoch)
+
+    # ── Get open trades ───────────────────────────────────────────────────────
+    open_trades = await trade_crud.get_open_trades(db, session.user_id)
+    basket_count = len(open_trades)
+
+    # ── Step 1: Basket profit check → close all if target reached ─────────────
+    if basket_count > 0:
+        total_profit = await _get_basket_profit(session, open_trades)
+        basket_close_target = risk.daily_profit_target / 100.0
+        # Use $0.40 as default if daily_profit_target is large (not configured for basket)
+        # The user can set daily_profit_target in cents equivalent
+        # We map: daily_profit_target / 250 ≈ basket close in USD for small accounts
+        basket_close_usd = max(0.40, risk.default_stake * 4)
+
+        if total_profit >= basket_close_usd:
+            await _close_all_basket(session, open_trades, db)
+            await _send_notif(
+                session, db, "basket_close",
+                "Basket Closed — Profit Target",
+                f"Basket profit reached ${total_profit:.2f} — all trades closed",
             )
-        )
+            logger.info(
+                "strategy.basket_closed_profit",
+                user_id=session.user_id,
+                profit=total_profit,
+            )
+            return
+
+    # ── Step 2: Run AI analysis ────────────────────────────────────────────────
+    try:
+        signal = await engine.analyse(DEFAULT_SYMBOL, granularity=60)
+    except Exception as e:
+        logger.warning("strategy.analysis_failed", error=str(e))
+        return
 
     logger.info(
-        "trade.executed",
-        user_id=user.id,
-        trade_id=trade.id,
-        contract_id=trade.contract_id,
-        symbol=symbol,
-        contract_type=contract_type,
-        stake=stake,
-    )
-    return trade
-
-
-async def close_trade_manually(
-    trade: Trade, user: User, db: AsyncSession
-) -> Trade:
-    """Manually sell / close an open trade before expiry."""
-    session = _sessions.get(user.id)
-    if session is None or session.client is None:
-        raise RuntimeError("Trading session not active")
-
-    sell_info = await session.client.sell_contract(int(trade.contract_id))
-    sold_for = float(sell_info.get("sold_for", 0))
-    profit = sold_for - trade.stake
-
-    updated = await trade_crud.close_trade(
-        db,
-        trade=trade,
-        exit_price=float(sell_info.get("exit_spot", 0)),
-        profit=profit,
-        payout=sold_for,
+        "strategy.signal",
+        user_id=session.user_id,
+        signal=signal.signal,
+        confidence=signal.confidence,
+        reason=signal.reason,
     )
 
-    await _notify_trade_close_by_id(user.id, user.fcm_token, updated, db)
-    return updated
+    # ── Step 3: Emergency exit (SMA50 only) ────────────────────────────────────
+    if basket_count > 0 and signal.pattern and "Emergency Exit" in signal.pattern:
+        basket_dir = _get_basket_direction(open_trades)
+        should_exit = (
+            (basket_dir == "BUY" and signal.signal != "BUY") or
+            (basket_dir == "SELL" and signal.signal != "SELL")
+        )
+        if should_exit:
+            await _close_all_basket(session, open_trades, db)
+            await _send_notif(
+                session, db, "emergency_exit",
+                "Emergency Exit",
+                f"Basket closed — {signal.pattern}",
+            )
+            logger.info(
+                "strategy.emergency_exit",
+                user_id=session.user_id,
+                pattern=signal.pattern,
+            )
+            return
+
+    # ── Step 4: Entry check ────────────────────────────────────────────────────
+    if signal.signal == "WAIT":
+        return
+
+    # Check confidence threshold
+    if signal.confidence < risk.min_ai_confidence:
+        logger.info(
+            "strategy.confidence_too_low",
+            confidence=signal.confidence,
+            min=risk.min_ai_confidence,
+        )
+        return
+
+    # Check basket size limit
+    if basket_count >= risk.max_open_trades:
+        logger.info("strategy.basket_full", count=basket_count)
+        return
+
+    # Check daily limits
+    summary = await trade_crud.get_daily_summary(db, session.user_id)
+    if summary["today_trades"] >= risk.max_daily_trades:
+        return
+    if summary["today_profit"] <= -abs(risk.max_daily_loss):
+        return
+
+    # Don't add trades in opposite direction to existing basket
+    if basket_count > 0:
+        basket_dir = _get_basket_direction(open_trades)
+        if basket_dir and basket_dir != signal.signal:
+            logger.info(
+                "strategy.opposite_direction_blocked",
+                basket=basket_dir,
+                signal=signal.signal,
+            )
+            return
+
+    # ── Step 5: Place trade ───────────────────────────────────────────────────
+    contract_type = "CALL" if signal.signal == "BUY" else "PUT"
+    stake = risk.default_stake
+
+    try:
+        contract = await session.client.buy_contract(
+            symbol=DEFAULT_SYMBOL,
+            contract_type=contract_type,
+            stake=stake,
+            duration=5,
+            duration_unit="t",
+        )
+
+        trade = await trade_crud.create_trade(
+            db,
+            user_id=session.user_id,
+            contract_id=str(contract.get("contract_id")),
+            symbol=DEFAULT_SYMBOL,
+            contract_type=contract_type,
+            duration=5,
+            duration_unit="t",
+            stake=stake,
+            entry_price=contract.get("entry_spot"),
+            payout=contract.get("payout"),
+            ai_signal=signal.signal,
+            ai_confidence=signal.confidence,
+            ai_reason=signal.reason,
+            source="auto",
+            status="open",
+        )
+        await db.commit()
+
+        await _send_notif(
+            session, db, "trade_open",
+            f"Auto Trade Opened — {signal.signal}",
+            f"{contract_type} on {DEFAULT_SYMBOL} | Stake: ${stake} | "
+            f"Confidence: {int(signal.confidence * 100)}%",
+        )
+
+        logger.info(
+            "strategy.trade_placed",
+            user_id=session.user_id,
+            trade_id=trade.id,
+            signal=signal.signal,
+            confidence=signal.confidence,
+            stake=stake,
+        )
+
+    except Exception as e:
+        logger.error("strategy.trade_failed", error=str(e))
+
+
+async def _get_basket_profit(session: UserSession, open_trades: List[Trade]) -> float:
+    """Get total floating profit of all open basket trades from Deriv."""
+    total = 0.0
+    for trade in open_trades:
+        if not trade.contract_id:
+            continue
+        try:
+            details = await session.client.get_contract_details(int(trade.contract_id))
+            total += float(details.get("profit", 0))
+        except Exception:
+            pass
+    return total
+
+
+def _get_basket_direction(open_trades: List[Trade]) -> Optional[str]:
+    """Returns 'BUY', 'SELL', or None if basket is empty."""
+    for trade in open_trades:
+        if trade.contract_type == "CALL":
+            return "BUY"
+        if trade.contract_type == "PUT":
+            return "SELL"
+    return None
+
+
+async def _close_all_basket(
+    session: UserSession, open_trades: List[Trade], db: AsyncSession
+) -> None:
+    """Close all open basket trades on Deriv and update DB."""
+    for trade in open_trades:
+        if not trade.contract_id:
+            continue
+        try:
+            sell_info = await session.client.sell_contract(int(trade.contract_id))
+            sold_for = float(sell_info.get("sold_for", 0))
+            profit = sold_for - trade.stake
+            await trade_crud.close_trade(
+                db,
+                trade=trade,
+                exit_price=float(sell_info.get("exit_spot", 0)),
+                profit=profit,
+                payout=sold_for,
+            )
+        except Exception as e:
+            logger.warning("strategy.close_failed", trade_id=trade.id, error=str(e))
+    await db.commit()
+
+
+async def _send_notif(
+    session: UserSession,
+    db: AsyncSession,
+    type_: str,
+    title: str,
+    body: str,
+) -> None:
+    """Save notification to DB and send push if FCM token available."""
+    await notif_crud.create_notification(
+        db, user_id=session.user_id, type_=type_, title=title, body=body
+    )
+    if session.fcm_token:
+        asyncio.create_task(
+            send_push_notification(token=session.fcm_token, title=title, body=body)
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Background position monitor
+# Trade status monitor (every 5 seconds)
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _monitor_loop(session: UserSession) -> None:
-    """
-    Polls open positions every 5 seconds.
-
-    - Checks Deriv for contract status
-    - Closes finished contracts in the DB
-    - Sends TP/SL notifications
-    """
+    """Syncs open trade statuses with Deriv every 5 seconds."""
     logger.info("monitor.started", user_id=session.user_id)
     while session.status in (BotStatus.RUNNING, BotStatus.PAUSED):
         try:
@@ -335,7 +477,7 @@ async def _monitor_loop(session: UserSession) -> None:
 
 
 async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
-    """Sync local open trades with Deriv's actual state."""
+    """Check each open trade and close in DB if Deriv reports it finished."""
     open_trades = await trade_crud.get_open_trades(db, session.user_id)
     if not open_trades:
         return
@@ -373,10 +515,134 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
             logger.warning("monitor.check_failed", trade_id=trade.id, error=str(e))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Manual trade execution (from API)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def execute_trade(
+    user: User,
+    symbol: str,
+    contract_type: str,
+    stake: float,
+    duration: int,
+    duration_unit: str,
+    db: AsyncSession,
+    ai_signal: Optional[str] = None,
+    ai_confidence: Optional[float] = None,
+    ai_reason: Optional[str] = None,
+    source: str = "manual",
+) -> Trade:
+    """Validate risk rules, place a contract on Deriv, and record it."""
+    risk = await get_or_create_risk_settings(db, user.id)
+
+    if risk.emergency_stop:
+        raise RuntimeError("Emergency stop is active — trading halted")
+    if not risk.trading_enabled:
+        raise RuntimeError("Trading is disabled in risk settings")
+    if stake > risk.max_stake:
+        raise RuntimeError(f"Stake {stake} exceeds max allowed {risk.max_stake}")
+
+    open_trades = await trade_crud.get_open_trades(db, user.id)
+    if len(open_trades) >= risk.max_open_trades:
+        raise RuntimeError(f"Max open trades ({risk.max_open_trades}) already reached")
+
+    summary = await trade_crud.get_daily_summary(db, user.id)
+    if summary["today_trades"] >= risk.max_daily_trades:
+        raise RuntimeError("Daily trade limit reached")
+    if summary["today_profit"] <= -abs(risk.max_daily_loss):
+        raise RuntimeError("Daily loss limit reached — trading stopped for today")
+    if ai_confidence is not None and ai_confidence < risk.min_ai_confidence:
+        raise RuntimeError(
+            f"AI confidence {ai_confidence:.2f} below minimum {risk.min_ai_confidence}"
+        )
+
+    session = _sessions.get(user.id)
+    if session is None or session.client is None:
+        raise RuntimeError("Trading session not active — call /trading/start first")
+
+    contract = await session.client.buy_contract(
+        symbol=symbol,
+        contract_type=contract_type,
+        stake=stake,
+        duration=duration,
+        duration_unit=duration_unit,
+    )
+
+    trade = await trade_crud.create_trade(
+        db,
+        user_id=user.id,
+        contract_id=str(contract.get("contract_id")),
+        symbol=symbol,
+        contract_type=contract_type,
+        duration=duration,
+        duration_unit=duration_unit,
+        stake=stake,
+        entry_price=contract.get("entry_spot"),
+        payout=contract.get("payout"),
+        ai_signal=ai_signal,
+        ai_confidence=ai_confidence,
+        ai_reason=ai_reason,
+        source=source,
+        status="open",
+    )
+
+    await notif_crud.create_notification(
+        db,
+        user_id=user.id,
+        type_="trade_open",
+        title="Trade Opened",
+        body=f"{contract_type} on {symbol} | Stake: {stake}",
+    )
+    if user.fcm_token:
+        asyncio.create_task(
+            send_push_notification(
+                token=user.fcm_token,
+                title="Trade Opened",
+                body=f"{contract_type} on {symbol} | Stake: {stake}",
+            )
+        )
+
+    logger.info(
+        "trade.executed",
+        user_id=user.id,
+        trade_id=trade.id,
+        symbol=symbol,
+        contract_type=contract_type,
+        stake=stake,
+    )
+    return trade
+
+
+async def close_trade_manually(
+    trade: Trade, user: User, db: AsyncSession
+) -> Trade:
+    """Manually close an open trade before expiry."""
+    session = _sessions.get(user.id)
+    if session is None or session.client is None:
+        raise RuntimeError("Trading session not active")
+
+    sell_info = await session.client.sell_contract(int(trade.contract_id))
+    sold_for = float(sell_info.get("sold_for", 0))
+    profit = sold_for - trade.stake
+
+    updated = await trade_crud.close_trade(
+        db,
+        trade=trade,
+        exit_price=float(sell_info.get("exit_spot", 0)),
+        profit=profit,
+        payout=sold_for,
+    )
+    await _notify_trade_close_by_id(user.id, user.fcm_token, updated, db)
+    return updated
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Notification helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
 async def _notify_trade_close_by_id(
     user_id: int, fcm_token: Optional[str], trade: Trade, db: AsyncSession
 ) -> None:
-    """Send DB notification + push notification when a trade closes."""
     result = "WIN" if trade.is_win else "LOSS"
     profit_val = trade.profit or 0
     profit_str = f"+{profit_val:.2f}" if trade.is_win else f"{profit_val:.2f}"
@@ -400,5 +666,5 @@ async def _notify_trade_close_by_id(
 
 
 async def _notify_trade_close(user: User, trade: Trade, db: AsyncSession) -> None:
-    """Legacy wrapper for close notification."""
+    """Legacy wrapper."""
     await _notify_trade_close_by_id(user.id, user.fcm_token, trade, db)

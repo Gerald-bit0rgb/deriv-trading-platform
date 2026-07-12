@@ -23,7 +23,7 @@ Strategy logic (ported from MA_Bias_Basket_EA.mq5):
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -183,7 +183,7 @@ class AIEngine:
         lows_4h   = np.array([float(c["low"])   for c in candles_4h])
 
         # ── 15M arrays ───────────────────────────────────────────────────────
-        opens_15m  = np.array([float(c["open"])  for c in candles_15m])
+        opens_15m  = np.array([float(c["open"])  for c in candles_15m])  # noqa: F841
         closes_15m = np.array([float(c["close"]) for c in candles_15m])
         highs_15m  = np.array([float(c["high"])  for c in candles_15m])
         lows_15m   = np.array([float(c["low"])   for c in candles_15m])
@@ -207,12 +207,10 @@ class AIEngine:
         # ── 15M indicators ───────────────────────────────────────────────────
         ema5_15m  = _ema(typical_15m, self.ENTRY_FAST_PERIOD)
         sma50_15m = _sma(typical_15m, self.ENTRY_SLOW_PERIOD)
-        sma20_15m = _sma(typical_15m, self.EXIT_SMA_PERIOD)
 
         # Last closed 15M bar
-        entry_fast  = ema5_15m[-2]
-        entry_slow  = sma50_15m[-2]
-        sma20_last  = sma20_15m[-2]
+        entry_fast     = ema5_15m[-2]
+        entry_slow     = sma50_15m[-2]   # SMA50 — used for entry AND emergency exit
         close_15m_last = closes_15m[-2]
 
         # ── Entry triggers ───────────────────────────────────────────────────
@@ -275,14 +273,14 @@ class AIEngine:
         else:
             volatility = "LOW"
 
-        # ── Emergency exit note ──────────────────────────────────────────────
+        # ── Emergency exit note (SMA50 only — matches EA logic) ─────────────
         pattern = None
         if signal == "BUY" or (signal == "WAIT" and bias_bull):
-            if close_15m_last < sma20_last or close_15m_last < entry_slow:
-                pattern = "Emergency Exit: Close < SMA20 or SMA50"
+            if close_15m_last < entry_slow:
+                pattern = "Emergency Exit Signal: Close < SMA50"
         elif signal == "SELL" or (signal == "WAIT" and bias_bear):
-            if close_15m_last > sma20_last or close_15m_last > entry_slow:
-                pattern = "Emergency Exit: Close > SMA20 or SMA50"
+            if close_15m_last > entry_slow:
+                pattern = "Emergency Exit Signal: Close > SMA50"
 
         reason_text = "; ".join(reasons)
 
