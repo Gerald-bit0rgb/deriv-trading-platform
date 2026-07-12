@@ -53,7 +53,7 @@ class DerivClient:
     def _rest_headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self._api_token}",
-            "Deriv-App-ID": str(self._app_id),
+            "Deriv-App-ID": str(self._app_id).strip(),
             "Content-Type": "application/json",
         }
 
