@@ -672,44 +672,81 @@ class _BotControlStrip extends ConsumerWidget {
     final notifier = ref.read(botStatusProvider.notifier);
     final isRunning = botStatus == 'running';
     final isPaused  = botStatus == 'paused';
+    final isConnecting = botStatus == 'connecting';
 
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: isRunning || isPaused ? null : () => notifier.startBot(),
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Start Bot'),
-            style:
-                ElevatedButton.styleFrom(backgroundColor: AppColors.success),
-          ),
-        ),
-        const SizedBox(width: 8),
+        // ── Service status info ────────────────────────────────────────────
         if (isRunning)
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () => notifier.pauseBot(),
-              icon: const Icon(Icons.pause),
-              label: const Text('Pause'),
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.success.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.success.withOpacity(0.3)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.check_circle_outline, color: AppColors.success, size: 14),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Bot is running in background. Safe to lock screen or switch apps.',
+                    style: TextStyle(color: AppColors.success, fontSize: 11),
+                  ),
+                ),
+              ],
             ),
           ),
-        if (isPaused)
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () => notifier.resumeBot(),
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Resume'),
+
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: isRunning || isPaused || isConnecting
+                    ? null
+                    : () => notifier.startBot(),
+                icon: isConnecting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.play_arrow),
+                label: Text(isConnecting ? 'Connecting...' : 'Start Bot'),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+              ),
             ),
-          ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed:
-                (isRunning || isPaused) ? () => notifier.stopBot() : null,
-            icon: const Icon(Icons.stop),
-            label: const Text('Stop'),
-            style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
-          ),
+            const SizedBox(width: 8),
+            if (isRunning)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => notifier.pauseBot(),
+                  icon: const Icon(Icons.pause),
+                  label: const Text('Pause'),
+                ),
+              ),
+            if (isPaused)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => notifier.resumeBot(),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Resume'),
+                ),
+              ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: (isRunning || isPaused)
+                    ? () => notifier.stopBot()
+                    : null,
+                icon: const Icon(Icons.stop),
+                label: const Text('Stop'),
+                style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+              ),
+            ),
+          ],
         ),
       ],
     );

@@ -1,81 +1,93 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/constants/app_constants.dart';
+import '../../core/services/background_service.dart';
 import '../providers/account_type_provider.dart';
 import '../providers/bot_symbol_provider.dart';
 import '../services/dashboard_service.dart';
-import '../services/trading_service.dart';
 
 final dashboardProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   return ref.read(dashboardServiceProvider).getDashboard();
 });
 
-// ── Bot status ────────────────────────────────────────────────────────────────
+// ── Bot status notifier ───────────────────────────────────────────────────────
 
 class BotStatusNotifier extends StateNotifier<String> {
   final Ref _ref;
   String? _lastError;
 
-  BotStatusNotifier(this._ref) : super('stopped');
+  BotStatusNotifier(this._ref) : super('stopped') {
+    _syncWithService();
+  }
 
   String? get lastError => _lastError;
+  void clearError() => _lastError = null;
 
-  void clearError() {
-    _lastError = null;
+  /// On startup check if background service is already running
+  Future<void> _syncWithService() async {
+    final running = await isBackgroundServiceRunning();
+    if (running && mounted) state = 'running';
+
+    // Listen to live status updates from the background service
+    botStatusStream().listen((data) {
+      if (data != null && mounted) {
+        final s = data['status'] as String? ?? state;
+        state = s;
+      }
+    });
   }
 
   Future<void> startBot() async {
     state = 'connecting';
     _lastError = null;
+
     try {
-      // Read selected symbol and account type from providers
-      final symbol = _ref.read(botSymbolProvider);
+      final symbol      = _ref.read(botSymbolProvider);
       final accountType = _ref.read(accountTypeProvider);
 
-      final result = await _ref.read(tradingServiceProvider).startBot(
-        symbol: symbol,
-        accountType: accountType,
-      );
-      state = result['status'] as String? ?? 'stopped';
+      // Save to SharedPreferences so the background service isolate can read them
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(AppConstants.botSymbolKey, symbol);
+      await prefs.setString('account_type', accountType);
+
+      // Start the foreground service — this keeps the bot alive with screen off
+      await startBackgroundBot();
+
+      if (mounted) state = 'running';
     } catch (e) {
       final msg = e.toString();
-      if (msg.contains('No Deriv API token') || msg.contains('token')) {
-        _lastError =
-            'No Deriv token saved. Go to Profile → save your token first.';
+      if (msg.contains('token')) {
+        _lastError = 'No Deriv token saved. Go to Profile → save your token first.';
       } else if (msg.contains('400')) {
         _lastError = 'Could not start bot. Check your Deriv token in Profile.';
       } else {
         _lastError = 'Bot error. Please try again.';
       }
-      state = 'error';
+      if (mounted) state = 'error';
     }
   }
 
   Future<void> pauseBot() async {
-    try {
-      final result = await _ref.read(tradingServiceProvider).pauseBot();
-      state = result['status'] as String? ?? state;
-    } catch (_) {}
+    pauseBackgroundBot();
+    if (mounted) state = 'paused';
   }
 
   Future<void> resumeBot() async {
-    try {
-      final result = await _ref.read(tradingServiceProvider).resumeBot();
-      state = result['status'] as String? ?? state;
-    } catch (_) {}
+    resumeBackgroundBot();
+    if (mounted) state = 'running';
   }
 
   Future<void> stopBot() async {
-    try {
-      final result = await _ref.read(tradingServiceProvider).stopBot();
-      state = result['status'] as String? ?? 'stopped';
-    } catch (_) {
-      state = 'stopped';
-    }
+    stopBackgroundBot();
     _lastError = null;
+    if (mounted) state = 'stopped';
   }
 
-  void setStatus(String s) => state = s;
+  void setStatus(String s) {
+    if (mounted) state = s;
+  }
 }
 
 final botStatusProvider =

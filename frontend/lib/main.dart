@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/utils/router.dart';
+import 'core/services/background_service.dart';
 import 'data/providers/theme_provider.dart';
 
 Future<void> main() async {
@@ -14,6 +15,10 @@ Future<void> main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+
+  // Initialise background service (foreground service for Android)
+  // This allows the bot to keep running with screen off
+  await initBackgroundService();
 
   runApp(
     const ProviderScope(child: DerivTradingApp()),
