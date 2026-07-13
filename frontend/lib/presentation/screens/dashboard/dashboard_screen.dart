@@ -373,8 +373,23 @@ class _AccountTypeSwitcher extends ConsumerWidget {
                 label: 'DEMO',
                 selected: isDemo,
                 color: AppColors.warning,
-                onTap: () =>
-                    ref.read(accountTypeProvider.notifier).setType('demo'),
+                onTap: () {
+                  if (!isDemo) {
+                    ref.read(accountTypeProvider.notifier).setType('demo');
+                    // Restart bot to connect to demo account
+                    final botNotifier = ref.read(botStatusProvider.notifier);
+                    botNotifier.stopBot().then((_) {
+                      Future.delayed(const Duration(seconds: 2), () {
+                        botNotifier.startBot();
+                      });
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Switching to Demo account — bot restarting...'),
+                      backgroundColor: AppColors.info,
+                      duration: Duration(seconds: 3),
+                    ));
+                  }
+                },
               ),
               const SizedBox(width: 8),
               // Real badge
@@ -411,7 +426,8 @@ class _AccountTypeSwitcher extends ConsumerWidget {
         content: const Text(
           'You are about to switch to REAL MONEY trading.\n\n'
           'All trades will use your actual Deriv balance.\n\n'
-          'Make sure you have tested on a demo account first.',
+          'Make sure you have tested on a demo account first.\n\n'
+          'The bot will restart to connect to your real account.',
         ),
         actions: [
           TextButton(
@@ -427,8 +443,20 @@ class _AccountTypeSwitcher extends ConsumerWidget {
         ],
       ),
     ).then((confirmed) {
-      if (confirmed == true && ref.context.mounted) {
+      if (confirmed == true) {
         ref.read(accountTypeProvider.notifier).setType('real');
+        // Restart bot to connect to real account
+        final botNotifier = ref.read(botStatusProvider.notifier);
+        botNotifier.stopBot().then((_) {
+          Future.delayed(const Duration(seconds: 2), () {
+            botNotifier.startBot();
+          });
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Switching to Real account — bot restarting...'),
+          backgroundColor: AppColors.warning,
+          duration: Duration(seconds: 3),
+        ));
       }
     });
   }

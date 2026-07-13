@@ -70,9 +70,12 @@ class UserSession:
         self._last_bar_time: Optional[int] = None   # last 15M bar epoch processed
 
     async def connect(self) -> None:
-        self.client = DerivClient(api_token=self.api_token)
+        self.client = DerivClient(
+            api_token=self.api_token,
+            account_type=self.account_type,
+        )
         await self.client.connect()
-        logger.info("session.connected", user_id=self.user_id)
+        logger.info("session.connected", user_id=self.user_id, account_type=self.account_type)
 
     async def disconnect(self) -> None:
         if self.client:

@@ -31,9 +31,10 @@ class DerivClient:
     Deriv API client supporting pat_ tokens via the new Options API.
     """
 
-    def __init__(self, api_token: str, app_id: int = None):
+    def __init__(self, api_token: str, app_id: int = None, account_type: str = "demo"):
         self._api_token = api_token
         self._app_id = app_id or settings.DERIV_APP_ID
+        self._preferred_account_type = account_type  # "demo" or "real"
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._ws_url: Optional[str] = None
         self._account_id: Optional[str] = None
@@ -111,17 +112,20 @@ class DerivClient:
             if not accounts:
                 raise RuntimeError("Could not get or create a Deriv trading account")
 
-            # Prefer demo account for safety; fall back to first available
-            account = next(
-                (a for a in accounts if a.get("account_type") == "demo"),
-                accounts[0],
+            # Pick account based on preferred type
+            preferred = next(
+                (a for a in accounts if a.get("account_type") == self._preferred_account_type),
+                None,
             )
+            # If preferred type not found, fall back to any available account
+            account = preferred or accounts[0]
             self._account_id = account["account_id"]
             self._account_type = account.get("account_type", "demo")
             logger.info(
                 "deriv.account_selected",
                 account_id=self._account_id,
                 account_type=self._account_type,
+                requested=self._preferred_account_type,
             )
 
             # Step 2 — Get OTP WebSocket URL
