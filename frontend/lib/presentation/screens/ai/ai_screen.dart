@@ -8,6 +8,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../data/models/ai_signal_model.dart';
 import '../../../data/providers/dashboard_provider.dart';
 import '../../../data/services/ai_service.dart';
+import '../../../data/services/trading_service.dart';
 
 class AiScreen extends ConsumerStatefulWidget {
   const AiScreen({super.key});
@@ -46,6 +47,23 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   Future<void> _autoTrade() async {
     setState(() => _isAutoTrading = true);
     try {
+      // First verify bot is running on the server
+      final statusResult =
+          await ref.read(tradingServiceProvider).getBotStatus();
+      if (statusResult != 'running') {
+        // Bot not running on server — restart it
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Bot restarting... please wait a moment and try again.'),
+            backgroundColor: AppColors.warning,
+            duration: Duration(seconds: 3),
+          ));
+        }
+        ref.read(botStatusProvider.notifier).startBot();
+        if (mounted) setState(() => _isAutoTrading = false);
+        return;
+      }
+
       final result = await ref.read(aiServiceProvider).autoTrade(
         symbol: _selectedSymbol,
         stake: _autoStake,
@@ -66,9 +84,10 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         final msg = e.toString();
         String friendly;
         if (msg.contains('400') || msg.contains('trading session')) {
-          friendly = 'Bot not running on server.\nGo to Dashboard → Stop Bot → Start Bot again.';
+          friendly =
+              'Bot session expired.\nGo to Dashboard → tap Start Bot, then try again.';
         } else if (msg.contains('500')) {
-          friendly = 'Server error. Please try again.';
+          friendly = 'Server error. Please try again in a moment.';
         } else {
           friendly = 'Auto-trade error. Please try again.';
         }
