@@ -36,7 +36,8 @@ Last updated: July 2026
 14. All important links
 15. Environment variables reference
 16. Quick renewal checklist
-17. **MOVING TO A NEW RENDER ACCOUNT — Full Guide**
+17. Moving to a new Render account — Full Guide
+18. **SESSION EXPIRY — Why it happens and how to fix it**
 
 ---
 
@@ -1193,3 +1194,202 @@ These do not change — no action needed:
 ---
 
 *End of Part 17*
+
+---
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PART 18 — SESSION EXPIRY
+# Why "Session Expired" happens and exactly how to fix it
+# ═══════════════════════════════════════════════════════════════
+
+## What is a session?
+
+When you log in to the app, the backend gives your phone two tokens:
+
+```
+Access Token  — like a key card, used for every request
+Refresh Token — used to get a new access token when the old one expires
+```
+
+Both tokens have an expiry time. When the access token expires the app
+automatically tries to use the refresh token to get a new one. If that
+also fails — you see "Session Expired" and get logged out.
+
+---
+
+## Why does the session expire early?
+
+There are 4 causes — from most common to least common:
+
+---
+
+### Cause 1 — ACCESS_TOKEN_EXPIRE_MINUTES is too short (most common)
+
+**Default value in the code: 60 minutes**
+
+This means if you do not open the app for 60 minutes, the token expires.
+When you open the app again it tries to refresh automatically — but if
+Render is sleeping (free tier), the refresh request times out before
+Render wakes up, and you get logged out.
+
+**Signs this is the cause:**
+- Session expires after exactly 1 hour of not using the app
+- Happens frequently when using Render free tier
+
+---
+
+### Cause 2 — Render free tier server is sleeping
+
+**How it works:**
+- Render free tier sleeps after 15 minutes of no activity
+- When your access token expires and the app tries to refresh it,
+  the server takes 30-60 seconds to wake up
+- The old code only waited 15 seconds before giving up
+- Result: refresh fails → session expired
+
+**Signs this is the cause:**
+- Session expires when you have not used the app for a while
+- Dashboard shows "Server is starting up" before the session expired message
+- Happens more on free tier than paid
+
+---
+
+### Cause 3 — REFRESH_TOKEN_EXPIRE_DAYS is too short
+
+**Default value in the code: 30 days**
+
+The refresh token itself expires after 30 days. After 30 days you must
+log in again manually. This is normal behaviour but can be extended.
+
+**Signs this is the cause:**
+- You have not logged in for over 30 days
+- Both token and refresh token are expired
+
+---
+
+### Cause 4 — SECRET_KEY was changed
+
+If the SECRET_KEY environment variable on Render is changed,
+ALL tokens become invalid immediately and everyone gets logged out.
+
+**Signs this is the cause:**
+- Everyone using the app gets logged out at the same time
+- Happened right after you changed something on Render
+
+---
+
+## The complete fix — what to change on Render
+
+### Step 1 — Log in to Render
+1. Go to: https://dashboard.render.com
+2. Click your backend service: **deriv-trading-backend**
+3. Click the **"Environment"** tab
+
+### Step 2 — Change these two values
+
+Find each variable and update it:
+
+**Change 1 — Make access token last 7 days instead of 1 hour:**
+
+| Key | Old value | New value | What it means |
+|-----|-----------|-----------|---------------|
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | `10080` | 7 days (7 × 24 × 60 = 10080 minutes) |
+
+**Change 2 — Make refresh token last 90 days instead of 30:**
+
+| Key | Old value | New value | What it means |
+|-----|-----------|-----------|---------------|
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | `90` | 3 months |
+
+### Step 3 — Save and redeploy
+1. Click **"Save Changes"**
+2. Render redeploys automatically
+3. Wait for status to show **"Live"**
+
+### Step 4 — Log out and log back in once
+The new token lifetime only applies to NEW tokens. Your current token
+still has the old expiry. Log out and log back in to get a fresh token
+with the new 7-day lifetime.
+
+1. Open app → Profile tab → Sign Out
+2. Sign In with email and password
+3. Done — new session lasts 7 days
+
+---
+
+## What the values mean — choosing the right number
+
+| Value | Meaning | Good for |
+|-------|---------|---------|
+| `ACCESS_TOKEN_EXPIRE_MINUTES = 60` | Token expires every hour | High security, frequent login required |
+| `ACCESS_TOKEN_EXPIRE_MINUTES = 1440` | Token expires every day | Balanced |
+| `ACCESS_TOKEN_EXPIRE_MINUTES = 10080` | Token expires every 7 days | **Recommended for this app** |
+| `ACCESS_TOKEN_EXPIRE_MINUTES = 43200` | Token expires every 30 days | Long-term, very convenient |
+
+| Value | Meaning | Good for |
+|-------|---------|---------|
+| `REFRESH_TOKEN_EXPIRE_DAYS = 7` | Must re-login every week | High security |
+| `REFRESH_TOKEN_EXPIRE_DAYS = 30` | Must re-login every month | Default |
+| `REFRESH_TOKEN_EXPIRE_DAYS = 90` | Must re-login every 3 months | **Recommended** |
+| `REFRESH_TOKEN_EXPIRE_DAYS = 365` | Must re-login once a year | Very convenient |
+
+---
+
+## Code fix that was already applied
+
+The app code was also updated to wait longer when refreshing the token.
+
+**Old behaviour:**
+- Token expires → app tries to refresh → waits 15 seconds → Render still
+  waking up → gives up → logs you out
+
+**New behaviour:**
+- Token expires → app tries to refresh → waits **60 seconds** → Render
+  wakes up in that time → refresh succeeds → you stay logged in
+
+This means even on the free tier, the auto-refresh works correctly now
+because it gives the server enough time to wake up.
+
+---
+
+## Summary — minimum steps to never see "Session Expired" again
+
+```
+On Render → Environment tab:
+
+1. ACCESS_TOKEN_EXPIRE_MINUTES = 10080   (change from 60)
+2. REFRESH_TOKEN_EXPIRE_DAYS = 90        (change from 30)
+3. Save Changes → wait for Live
+
+In the app:
+4. Profile → Sign Out
+5. Sign In again
+```
+
+After those 5 steps you will not see "Session Expired" for 7 days.
+After 7 days the app auto-refreshes silently in the background.
+You only need to manually log in again every 90 days.
+
+---
+
+## Security note
+
+Longer token lifetimes are less secure because if someone steals
+your token they have more time to use it. For a personal trading app
+on your own phone, 7-day access tokens and 90-day refresh tokens are
+a good balance between security and convenience.
+
+If you ever think your tokens are compromised:
+1. Go to Render → Environment → change your SECRET_KEY to a new random string
+2. This immediately invalidates ALL tokens for ALL users
+3. Everyone must log in again
+4. Generate new SECRET_KEY:
+   ```
+   python -c "import secrets; print(secrets.token_hex(64))"
+   ```
+
+---
+
+*End of Part 18*
