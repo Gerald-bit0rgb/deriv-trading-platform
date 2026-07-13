@@ -23,8 +23,29 @@ logger = get_logger(__name__)
 
 
 async def _get_engine(user_id: int, db: AsyncSession) -> AIEngine:
-    """Get AI engine with user's strategy settings loaded."""
+    """Get AI engine — auto-restarts session if expired."""
+    from app.db.session import async_session_factory
+    from app.crud.user import get_user_by_id
+
     session = trading_engine.get_session(user_id)
+    if session is None or session.client is None:
+        # Try to restart from DB
+        user = await get_user_by_id(db, user_id)
+        if user and user.deriv_api_token:
+            try:
+                await trading_engine.start_trading_with_token(
+                    user_id=user.id,
+                    api_token=user.deriv_api_token,
+                    username=user.username,
+                    fcm_token=user.fcm_token,
+                    db_factory=async_session_factory,
+                    symbol="R_100",
+                    account_type="demo",
+                )
+                session = trading_engine.get_session(user_id)
+            except Exception:
+                pass
+
     if session is None or session.client is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -110,7 +131,35 @@ async def ai_auto_trade(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Analyse market and execute a trade if confident enough."""
+    """Analyse market and execute a trade if confident enough.
+    Auto-restarts the bot session if it has expired."""
+    from app.db.session import async_session_factory
+
+    # ── Auto-restart bot session if expired ───────────────────────────────────
+    session = trading_engine.get_session(current_user.id)
+    if session is None or session.client is None:
+        if not current_user.deriv_api_token:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="No Deriv API token saved. Go to Profile and save your token first.",
+            )
+        try:
+            await trading_engine.start_trading_with_token(
+                user_id=current_user.id,
+                api_token=current_user.deriv_api_token,
+                username=current_user.username,
+                fcm_token=current_user.fcm_token,
+                db_factory=async_session_factory,
+                symbol=symbol,
+                account_type="demo",
+            )
+            logger.info("ai_auto_trade.session_restarted", user_id=current_user.id)
+        except Exception as e:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not connect to Deriv: {str(e)}",
+            )
+
     engine = await _get_engine(current_user.id, db)
     signal = await engine.analyse(symbol, granularity=granularity)
 
