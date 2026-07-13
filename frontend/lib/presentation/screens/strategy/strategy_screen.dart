@@ -399,17 +399,20 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
         _SectionHeader(
           title: 'CANDLE CONFIRMATION',
           subtitle:
-              'Require 2 consecutive candles to confirm entry signal',
+              'Previous candle must close higher/lower than the one before it',
           color: AppColors.accent,
         ),
         SwitchListTile(
-          title: const Text('Require 2-Candle Confirmation',
+          title: const Text('Require Higher/Lower Close Confirmation',
               style: TextStyle(fontWeight: FontWeight.w600)),
           subtitle: const Text(
-            'Both current AND previous candle must close on the same\n'
-            'side of the fast MA before entering a trade.\n'
-            'OFF = original EA logic (1 candle only)\n'
-            'ON = stricter filter, fewer but higher quality signals',
+            'OFF = original EA logic\n'
+            '      Current candle just needs to close above/below EMA\n\n'
+            'ON = stricter momentum filter\n'
+            '      For BUY: previous candle close must be HIGHER than\n'
+            '      the candle before it (upward momentum confirmed)\n'
+            '      For SELL: previous candle close must be LOWER than\n'
+            '      the candle before it (downward momentum confirmed)',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
           value: _settings!.requireCandleConfirmation,
