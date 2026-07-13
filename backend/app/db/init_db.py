@@ -31,6 +31,11 @@ async def init_db() -> None:
             ALTER TABLE strategy_settings
             ADD COLUMN IF NOT EXISTS require_candle_confirmation BOOLEAN DEFAULT FALSE
             """,
+            """
+            UPDATE strategy_settings
+            SET require_candle_confirmation = FALSE
+            WHERE require_candle_confirmation = TRUE
+            """,
         ]
         for sql in migrations:
             try:
