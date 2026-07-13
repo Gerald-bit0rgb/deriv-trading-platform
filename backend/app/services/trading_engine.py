@@ -242,15 +242,27 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
 
     # ── Check for new bar on entry timeframe ─────────────────────────────────
     try:
-        candles = await session.client.get_candles(session.symbol, granularity=strat.entry_timeframe, count=2)
+        candles = await session.client.get_candles(
+            session.symbol, granularity=strat.entry_timeframe, count=5
+        )
         if not candles:
+            logger.warning("strategy.no_candles_returned",
+                           user_id=session.user_id, symbol=session.symbol)
             return
         current_bar_epoch = int(candles[-2].get("epoch", 0))
         if current_bar_epoch == session._last_bar_time:
+            logger.info("strategy.same_bar_skipping", user_id=session.user_id)
             return
         session._last_bar_time = current_bar_epoch
+        logger.info("strategy.new_bar_processing",
+                    user_id=session.user_id,
+                    epoch=current_bar_epoch,
+                    symbol=session.symbol)
     except Exception as e:
-        logger.warning("strategy.bar_check_failed", error=str(e))
+        logger.error("strategy.bar_check_failed",
+                     user_id=session.user_id,
+                     symbol=session.symbol,
+                     error=str(e))
         return
 
     logger.info("strategy.new_bar", user_id=session.user_id, epoch=current_bar_epoch)
@@ -282,8 +294,16 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
     # ── Step 2: Run AI analysis ────────────────────────────────────────────────
     try:
         signal = await engine.analyse(session.symbol, granularity=60)
+        logger.info(
+            "strategy.analysis_result",
+            user_id=session.user_id,
+            symbol=session.symbol,
+            signal=signal.signal,
+            confidence=signal.confidence,
+            reason=signal.reason[:100] if signal.reason else "",
+        )
     except Exception as e:
-        logger.warning("strategy.analysis_failed", error=str(e))
+        logger.error("strategy.analysis_failed", user_id=session.user_id, error=str(e))
         return
 
     logger.info(

@@ -281,12 +281,17 @@ class DerivClient:
     async def get_candles(self, symbol: str, granularity: int = 60, count: int = 200) -> list:
         response = await self._send({
             "ticks_history": symbol,
+            "underlying_symbol": symbol,
             "style": "candles",
             "granularity": granularity,
             "count": count,
             "end": "latest",
         })
-        return response.get("candles", [])
+        candles = response.get("candles", [])
+        # Also try alternate response key
+        if not candles:
+            candles = response.get("history", {}).get("candles", [])
+        return candles
 
     # ─────────────────────────────────────────────────────────────────────────
     # Trading

@@ -44,21 +44,6 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   }
 
   Future<void> _autoTrade() async {
-    // Check bot status first
-    final botStatus = ref.read(botStatusProvider);
-    if (botStatus != 'running') {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-            'Bot is not running. Go to Dashboard → tap Start Bot first.',
-          ),
-          backgroundColor: AppColors.warning,
-          duration: Duration(seconds: 4),
-        ));
-      }
-      return;
-    }
-
     setState(() => _isAutoTrading = true);
     try {
       final result = await ref.read(aiServiceProvider).autoTrade(
@@ -81,7 +66,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         final msg = e.toString();
         String friendly;
         if (msg.contains('400') || msg.contains('trading session')) {
-          friendly = 'Bot not running. Go to Dashboard → Start Bot first.';
+          friendly = 'Bot not running on server.\nGo to Dashboard → Stop Bot → Start Bot again.';
         } else if (msg.contains('500')) {
           friendly = 'Server error. Please try again.';
         } else {
@@ -90,7 +75,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(friendly),
           backgroundColor: AppColors.danger,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 5),
         ));
       }
     } finally {
@@ -108,26 +93,25 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ── Bot status banner ─────────────────────────────────────────────
-          if (!isRunning)
+          // ── Bot status banner — only show if clearly stopped ──────────────
+          if (botStatus == 'stopped' || botStatus == 'error')
             Container(
               padding: const EdgeInsets.all(12),
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: AppColors.warning.withOpacity(0.12),
+                color: AppColors.info.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+                border: Border.all(color: AppColors.info.withOpacity(0.3)),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded,
-                      color: AppColors.warning, size: 18),
+                  Icon(Icons.info_outline, color: AppColors.info, size: 16),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Bot is not running. Go to Dashboard → Start Bot to enable auto-trading.',
-                      style: TextStyle(
-                          color: AppColors.warning, fontSize: 13),
+                      'Start the bot from Dashboard to enable auto-trading. '
+                      'You can still analyse the market without the bot.',
+                      style: TextStyle(color: AppColors.info, fontSize: 12),
                     ),
                   ),
                 ],
