@@ -8,7 +8,6 @@ import '../../../core/utils/formatters.dart';
 import '../../../data/models/ai_signal_model.dart';
 import '../../../data/providers/dashboard_provider.dart';
 import '../../../data/services/ai_service.dart';
-import '../../../data/services/trading_service.dart';
 
 class AiScreen extends ConsumerStatefulWidget {
   const AiScreen({super.key});
@@ -47,23 +46,6 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   Future<void> _autoTrade() async {
     setState(() => _isAutoTrading = true);
     try {
-      // First verify bot is running on the server
-      final statusResult =
-          await ref.read(tradingServiceProvider).getBotStatus();
-      if (statusResult != 'running') {
-        // Bot not running on server — restart it
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Bot restarting... please wait a moment and try again.'),
-            backgroundColor: AppColors.warning,
-            duration: Duration(seconds: 3),
-          ));
-        }
-        ref.read(botStatusProvider.notifier).startBot();
-        if (mounted) setState(() => _isAutoTrading = false);
-        return;
-      }
-
       final result = await ref.read(aiServiceProvider).autoTrade(
         symbol: _selectedSymbol,
         stake: _autoStake,
@@ -74,7 +56,8 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         final executed = result['executed'] as bool? ?? false;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(executed
-              ? '✓ Trade executed: ${result['contract_type']} (${Fmt.confidence((result['confidence'] as num).toDouble())} confidence)'
+              ? '✓ Trade executed: ${result['contract_type']} '
+                '(${Fmt.confidence((result['confidence'] as num).toDouble())} confidence)'
               : '⏳ AI decided to WAIT — ${result['reason']}'),
           backgroundColor: executed ? AppColors.success : AppColors.warning,
         ));
@@ -84,8 +67,9 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         final msg = e.toString();
         String friendly;
         if (msg.contains('400') || msg.contains('trading session')) {
-          friendly =
-              'Bot session expired.\nGo to Dashboard → tap Start Bot, then try again.';
+          // Bot session lost on server — restart it automatically
+          friendly = 'Bot session expired. Restarting bot...';
+          ref.read(botStatusProvider.notifier).startBot();
         } else if (msg.contains('500')) {
           friendly = 'Server error. Please try again in a moment.';
         } else {
@@ -93,8 +77,8 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(friendly),
-          backgroundColor: AppColors.danger,
-          duration: const Duration(seconds: 5),
+          backgroundColor: AppColors.warning,
+          duration: const Duration(seconds: 4),
         ));
       }
     } finally {
