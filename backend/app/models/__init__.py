@@ -3,5 +3,6 @@ from app.models.user import User
 from app.models.trade import Trade
 from app.models.risk_settings import RiskSettings
 from app.models.notification import Notification
+from app.models.strategy_settings import StrategySettings
 
-__all__ = ["User", "Trade", "RiskSettings", "Notification"]
+__all__ = ["User", "Trade", "RiskSettings", "Notification", "StrategySettings"]

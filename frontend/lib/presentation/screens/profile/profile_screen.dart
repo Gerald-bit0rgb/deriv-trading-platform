@@ -155,7 +155,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           const SizedBox(height: 12),
 
-          // ── Appearance ────────────────────────────────────────────────────
+          // ── Strategy Settings ─────────────────────────────────────────────
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.tune, color: AppColors.primary),
+              title: const Text('Strategy Settings',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Timeframes, MA periods, applied price',
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+              onTap: () => context.go('/strategy'),
+            ),
+          ),
+          const SizedBox(height: 12),
           _SectionCard(
             title: 'Appearance',
             icon: Icons.palette_outlined,

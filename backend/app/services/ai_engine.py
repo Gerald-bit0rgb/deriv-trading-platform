@@ -128,135 +128,174 @@ def _atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 
 
 class AIEngine:
     """
-    MA Bias Basket strategy ported from MQL5 to Python.
-
-    Bias timeframe  : 4H  (EMA5/EMA13 on Close + ADX14 >= 20)
-    Entry timeframe : 15M (EMA5 vs SMA50 on Typical Price + candle close position)
-    Exit monitor    : 15M SMA20 and SMA50 for emergency exit signals
+    MA Bias Basket strategy — fully configurable parameters.
+    All defaults match the original MQL5 EA inputs.
     """
 
-    # Strategy parameters (matching the MQL5 EA defaults)
-    BIAS_FAST_PERIOD = 5
-    BIAS_SLOW_PERIOD = 13
-    ADX_PERIOD = 14
-    ADX_THRESHOLD = 20.0
-
-    ENTRY_FAST_PERIOD = 5    # EMA on Typical Price
-    ENTRY_SLOW_PERIOD = 50   # SMA on Typical Price
-    EXIT_SMA_PERIOD = 20     # SMA20 for emergency exit
-
-    def __init__(self, client: DerivClient):
+    def __init__(self, client: DerivClient, settings=None):
         self.client = client
+        self._s = settings  # StrategySettings ORM object or None (uses defaults)
+
+    def _get(self, attr: str, default):
+        """Get setting value from DB settings or fall back to default."""
+        if self._s is not None:
+            return getattr(self._s, attr, default)
+        return default
 
     async def analyse(self, symbol: str, granularity: int = 60) -> Signal:
-        """
-        Full MA Bias Basket analysis for *symbol*.
+        """Full MA Bias Basket analysis using configured or default parameters."""
 
-        Fetches both 4H and 15M candles then applies the strategy logic.
-        granularity parameter is kept for API compatibility but we fetch
-        both required timeframes internally.
-        """
-        # Fetch 4H candles (granularity = 14400 seconds)
+        # ── Load parameters ──────────────────────────────────────────────────
+        bias_tf        = self._get("bias_timeframe", 14400)
+        bias_fast_p    = self._get("bias_fast_period", 5)
+        bias_slow_p    = self._get("bias_slow_period", 13)
+        bias_method    = self._get("bias_ma_method", "EMA")
+        bias_price     = self._get("bias_applied_price", "CLOSE")
+        adx_enabled    = self._get("adx_enabled", True)
+        adx_period     = self._get("adx_period", 14)
+        adx_threshold  = self._get("adx_threshold", 20.0)
+        entry_tf       = self._get("entry_timeframe", 900)
+        entry_fast_p   = self._get("entry_fast_period", 5)
+        entry_fast_m   = self._get("entry_fast_method", "EMA")
+        entry_slow_p   = self._get("entry_slow_period", 50)
+        entry_slow_m   = self._get("entry_slow_method", "SMA")
+        entry_price    = self._get("entry_applied_price", "TYPICAL")
+        exit_enabled   = self._get("emergency_exit_enabled", True)
+        exit_sma_p     = self._get("exit_sma_period", 50)
+        # Fetch 4H candles (bias timeframe)
         try:
             candles_4h = await self.client.get_candles(
-                symbol, granularity=14400, count=100
+                symbol, granularity=bias_tf, count=100
             )
         except Exception as e:
             logger.error("ai_engine.4h_fetch_failed", symbol=symbol, error=str(e))
-            return self._wait_signal(symbol, "Unable to fetch 4H market data")
+            return self._wait_signal(symbol, "Unable to fetch bias timeframe data")
 
-        # Fetch 15M candles (granularity = 900 seconds)
+        # Fetch 15M candles (entry timeframe)
         try:
             candles_15m = await self.client.get_candles(
-                symbol, granularity=900, count=100
+                symbol, granularity=entry_tf, count=100
             )
         except Exception as e:
             logger.error("ai_engine.15m_fetch_failed", symbol=symbol, error=str(e))
-            return self._wait_signal(symbol, "Unable to fetch 15M market data")
+            return self._wait_signal(symbol, "Unable to fetch entry timeframe data")
 
         if len(candles_4h) < 30 or len(candles_15m) < 60:
             return self._wait_signal(symbol, "Insufficient candle data")
 
-        # ── 4H arrays ────────────────────────────────────────────────────────
+        # ── Build numpy arrays ────────────────────────────────────────────────
+        opens_4h  = np.array([float(c["open"])  for c in candles_4h])
         closes_4h = np.array([float(c["close"]) for c in candles_4h])
         highs_4h  = np.array([float(c["high"])  for c in candles_4h])
         lows_4h   = np.array([float(c["low"])   for c in candles_4h])
 
-        # ── 15M arrays ───────────────────────────────────────────────────────
-        opens_15m  = np.array([float(c["open"])  for c in candles_15m])  # noqa: F841
+        opens_15m  = np.array([float(c["open"])  for c in candles_15m])
         closes_15m = np.array([float(c["close"]) for c in candles_15m])
         highs_15m  = np.array([float(c["high"])  for c in candles_15m])
         lows_15m   = np.array([float(c["low"])   for c in candles_15m])
 
-        typical_15m = _typical_price(highs_15m, lows_15m, closes_15m)
+        # ── Applied price helpers ─────────────────────────────────────────────
+        def _apply_price(o, h, lo, c, price_type: str) -> np.ndarray:
+            p = price_type.upper()
+            if p == "OPEN":     return o
+            if p == "HIGH":     return h
+            if p == "LOW":      return lo
+            if p == "MEDIAN":   return (h + lo) / 2.0
+            if p == "TYPICAL":  return (h + lo + c) / 3.0
+            if p == "WEIGHTED": return (h + lo + c + c) / 4.0
+            return c  # default CLOSE
 
-        # ── 4H indicators ─────────────────────────────────────────────────────
-        ema5_4h  = _ema(closes_4h, self.BIAS_FAST_PERIOD)
-        ema13_4h = _ema(closes_4h, self.BIAS_SLOW_PERIOD)
-        adx_4h   = _adx(highs_4h, lows_4h, closes_4h, self.ADX_PERIOD)
+        def _apply_ma(prices: np.ndarray, period: int, method: str) -> np.ndarray:
+            m = method.upper()
+            if m == "SMA":  return _sma(prices, period)
+            if m == "WMA":
+                result = np.zeros_like(prices)
+                for i in range(period - 1, len(prices)):
+                    weights = np.arange(1, period + 1, dtype=float)
+                    result[i] = np.dot(prices[i - period + 1: i + 1], weights) / weights.sum()
+                return result
+            if m == "SMMA":
+                result = np.zeros_like(prices)
+                result[period - 1] = np.mean(prices[:period])
+                for i in range(period, len(prices)):
+                    result[i] = (result[i - 1] * (period - 1) + prices[i]) / period
+                return result
+            return _ema(prices, period)  # default EMA
 
-        # Use second-to-last bar (last CLOSED bar — same as MQL5 index 1)
-        bias_fast = ema5_4h[-2]
-        bias_slow = ema13_4h[-2]
+        # ── 4H indicator calculations ─────────────────────────────────────────
+        bias_price_arr = _apply_price(opens_4h, highs_4h, lows_4h, closes_4h, bias_price)
+        ema_fast_4h = _apply_ma(bias_price_arr, bias_fast_p, bias_method)
+        ema_slow_4h = _apply_ma(bias_price_arr, bias_slow_p, bias_method)
+        adx_4h = _adx(highs_4h, lows_4h, closes_4h, adx_period)
 
-        # ── 4H Bias determination ─────────────────────────────────────────────
-        adx_ok = adx_4h >= self.ADX_THRESHOLD
+        bias_fast = ema_fast_4h[-2]
+        bias_slow = ema_slow_4h[-2]
+
+        # ── 4H Bias ───────────────────────────────────────────────────────────
+        adx_ok = (not adx_enabled) or (adx_4h >= adx_threshold)
         bias_bull = bias_fast > bias_slow and adx_ok
         bias_bear = bias_fast < bias_slow and adx_ok
 
-        # ── 15M indicators ───────────────────────────────────────────────────
-        ema5_15m  = _ema(typical_15m, self.ENTRY_FAST_PERIOD)
-        sma50_15m = _sma(typical_15m, self.ENTRY_SLOW_PERIOD)
+        # ── 15M indicator calculations ────────────────────────────────────────
+        entry_price_arr = _apply_price(opens_15m, highs_15m, lows_15m, closes_15m, entry_price)
+        ema_fast_15m = _apply_ma(entry_price_arr, entry_fast_p, entry_fast_m)
+        sma_slow_15m = _apply_ma(entry_price_arr, entry_slow_p, entry_slow_m)
+        sma_exit_15m = _apply_ma(entry_price_arr, exit_sma_p, "SMA")
 
-        # Last closed 15M bar
-        entry_fast     = ema5_15m[-2]
-        entry_slow     = sma50_15m[-2]   # SMA50 — used for entry AND emergency exit
+        entry_fast     = ema_fast_15m[-2]
+        entry_slow     = sma_slow_15m[-2]
         close_15m_last = closes_15m[-2]
 
-        # ── Entry triggers ───────────────────────────────────────────────────
+        # ── Entry triggers ────────────────────────────────────────────────────
         price_above_fast = close_15m_last > entry_fast
         price_below_fast = close_15m_last < entry_fast
-
         buy_trigger  = (entry_fast > entry_slow) and price_above_fast
         sell_trigger = (entry_fast < entry_slow) and price_below_fast
+
+        # ── Timeframe labels for display ──────────────────────────────────────
+        tf_labels = {
+            60: "1M", 300: "5M", 600: "10M", 900: "15M",
+            1800: "30M", 3600: "1H", 7200: "2H", 14400: "4H",
+            28800: "8H", 86400: "1D",
+        }
+        bias_tf_label  = tf_labels.get(bias_tf, f"{bias_tf}s")
+        entry_tf_label = tf_labels.get(entry_tf, f"{entry_tf}s")
 
         # ── Final signal ─────────────────────────────────────────────────────
         if bias_bull and buy_trigger:
             signal = "BUY"
             reasons = [
-                f"4H EMA{self.BIAS_FAST_PERIOD}({bias_fast:.5f}) > EMA{self.BIAS_SLOW_PERIOD}({bias_slow:.5f}) — BULLISH bias",
-                f"ADX({adx_4h:.1f}) >= {self.ADX_THRESHOLD} — trend confirmed",
-                f"15M EMA{self.ENTRY_FAST_PERIOD}({entry_fast:.5f}) > SMA{self.ENTRY_SLOW_PERIOD}({entry_slow:.5f})",
-                f"15M candle closed above EMA{self.ENTRY_FAST_PERIOD} ({close_15m_last:.5f})",
+                f"{bias_tf_label} {bias_method}{bias_fast_p}({bias_fast:.5f}) > {bias_method}{bias_slow_p}({bias_slow:.5f}) — BULLISH",
+                f"ADX({adx_4h:.1f}) >= {adx_threshold}" if adx_enabled else "ADX filter disabled",
+                f"{entry_tf_label} {entry_fast_m}{entry_fast_p} > {entry_slow_m}{entry_slow_p}",
+                f"Candle closed above {entry_fast_m}{entry_fast_p} ({close_15m_last:.5f})",
             ]
-            confidence = self._calc_confidence(adx_4h, bias_fast, bias_slow, entry_fast, entry_slow)
+            confidence = self._calc_confidence(adx_4h, bias_fast, bias_slow, entry_fast, entry_slow, adx_threshold)
             trend = "BULLISH"
 
         elif bias_bear and sell_trigger:
             signal = "SELL"
             reasons = [
-                f"4H EMA{self.BIAS_FAST_PERIOD}({bias_fast:.5f}) < EMA{self.BIAS_SLOW_PERIOD}({bias_slow:.5f}) — BEARISH bias",
-                f"ADX({adx_4h:.1f}) >= {self.ADX_THRESHOLD} — trend confirmed",
-                f"15M EMA{self.ENTRY_FAST_PERIOD}({entry_fast:.5f}) < SMA{self.ENTRY_SLOW_PERIOD}({entry_slow:.5f})",
-                f"15M candle closed below EMA{self.ENTRY_FAST_PERIOD} ({close_15m_last:.5f})",
+                f"{bias_tf_label} {bias_method}{bias_fast_p}({bias_fast:.5f}) < {bias_method}{bias_slow_p}({bias_slow:.5f}) — BEARISH",
+                f"ADX({adx_4h:.1f}) >= {adx_threshold}" if adx_enabled else "ADX filter disabled",
+                f"{entry_tf_label} {entry_fast_m}{entry_fast_p} < {entry_slow_m}{entry_slow_p}",
+                f"Candle closed below {entry_fast_m}{entry_fast_p} ({close_15m_last:.5f})",
             ]
-            confidence = self._calc_confidence(adx_4h, bias_slow, bias_fast, entry_slow, entry_fast)
+            confidence = self._calc_confidence(adx_4h, bias_slow, bias_fast, entry_slow, entry_fast, adx_threshold)
             trend = "BEARISH"
 
         else:
-            # Build WAIT reasons
             reasons = []
             if not adx_ok:
-                reasons.append(f"ADX({adx_4h:.1f}) < {self.ADX_THRESHOLD} — trend too weak")
+                reasons.append(f"ADX({adx_4h:.1f}) < {adx_threshold} — trend too weak")
             if not bias_bull and not bias_bear:
-                reasons.append("4H EMAs are too close — no clear bias")
+                reasons.append(f"{bias_tf_label} MAs too close — no clear bias")
             if bias_bull and not buy_trigger:
-                reasons.append("4H is bullish but 15M entry not confirmed yet")
+                reasons.append(f"{bias_tf_label} bullish but {entry_tf_label} entry not confirmed")
             if bias_bear and not sell_trigger:
-                reasons.append("4H is bearish but 15M entry not confirmed yet")
+                reasons.append(f"{bias_tf_label} bearish but {entry_tf_label} entry not confirmed")
             if not reasons:
-                reasons.append("Bias and entry timeframes do not align")
-
+                reasons.append("Timeframes do not align — waiting")
             signal = "WAIT"
             confidence = 0.0
             trend = "BULLISH" if bias_fast > bias_slow else "BEARISH" if bias_fast < bias_slow else "SIDEWAYS"
@@ -275,12 +314,13 @@ class AIEngine:
 
         # ── Emergency exit note (SMA50 only — matches EA logic) ─────────────
         pattern = None
-        if signal == "BUY" or (signal == "WAIT" and bias_bull):
-            if close_15m_last < entry_slow:
-                pattern = "Emergency Exit Signal: Close < SMA50"
-        elif signal == "SELL" or (signal == "WAIT" and bias_bear):
-            if close_15m_last > entry_slow:
-                pattern = "Emergency Exit Signal: Close > SMA50"
+        if exit_enabled:
+            if signal == "BUY" or (signal == "WAIT" and bias_bull):
+                if close_15m_last < sma_exit_15m[-2]:
+                    pattern = f"Emergency Exit: Close < SMA{exit_sma_p}"
+            elif signal == "SELL" or (signal == "WAIT" and bias_bear):
+                if close_15m_last > sma_exit_15m[-2]:
+                    pattern = f"Emergency Exit: Close > SMA{exit_sma_p}"
 
         reason_text = "; ".join(reasons)
 
@@ -313,27 +353,15 @@ class AIEngine:
         slow_bias: float,
         fast_entry: float,
         slow_entry: float,
+        adx_threshold: float = 20.0,
     ) -> float:
-        """
-        Confidence score based on:
-        - How far apart the bias EMAs are (stronger separation = higher confidence)
-        - ADX strength (stronger trend = higher confidence)
-        - How far entry EMAs are separated
-        """
-        # Bias separation score (0-0.4)
         bias_sep = abs(fast_bias - slow_bias) / slow_bias if slow_bias != 0 else 0
         bias_score = min(bias_sep * 100, 0.4)
-
-        # ADX score (0-0.4): ADX 20=0.0, ADX 40=0.4
-        adx_score = min((adx - self.ADX_THRESHOLD) / 50.0, 0.4)
+        adx_score = min((adx - adx_threshold) / 50.0, 0.4)
         adx_score = max(adx_score, 0.0)
-
-        # Entry separation score (0-0.2)
         entry_sep = abs(fast_entry - slow_entry) / slow_entry if slow_entry != 0 else 0
         entry_score = min(entry_sep * 100, 0.2)
-
-        total = bias_score + adx_score + entry_score
-        return min(round(total, 3), 1.0)
+        return min(round(bias_score + adx_score + entry_score, 3), 1.0)
 
     def _wait_signal(self, symbol: str, reason: str) -> Signal:
         return Signal(

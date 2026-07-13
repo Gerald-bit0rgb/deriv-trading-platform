@@ -5,6 +5,7 @@ from app.api.risk import router as risk_router
 from app.api.ai import router as ai_router
 from app.api.dashboard import router as dashboard_router
 from app.api.notifications import router as notifications_router
+from app.api.strategy import router as strategy_router
 
 __all__ = [
     "auth_router",
@@ -13,4 +14,5 @@ __all__ = [
     "ai_router",
     "dashboard_router",
     "notifications_router",
+    "strategy_router",
 ]

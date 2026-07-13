@@ -225,11 +225,14 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
       5. Place new trade if signal aligns and basket allows
     """
     from app.services.ai_engine import AIEngine
+    from app.crud.strategy import get_strategy_settings as get_strat
 
     if session.client is None:
         return
 
-    engine = AIEngine(client=session.client)
+    # Load strategy settings for this user
+    strat = await get_strat(db, session.user_id)
+    engine = AIEngine(client=session.client, settings=strat)
 
     # ── Get risk settings ─────────────────────────────────────────────────────
     risk = await get_or_create_risk_settings(db, session.user_id)
@@ -237,14 +240,14 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
     if risk.emergency_stop or not risk.trading_enabled:
         return
 
-    # ── Check for new 15M bar ─────────────────────────────────────────────────
+    # ── Check for new bar on entry timeframe ─────────────────────────────────
     try:
-        candles = await session.client.get_candles(session.symbol, granularity=900, count=2)
+        candles = await session.client.get_candles(session.symbol, granularity=strat.entry_timeframe, count=2)
         if not candles:
             return
         current_bar_epoch = int(candles[-2].get("epoch", 0))
         if current_bar_epoch == session._last_bar_time:
-            return   # same bar — nothing to do
+            return
         session._last_bar_time = current_bar_epoch
     except Exception as e:
         logger.warning("strategy.bar_check_failed", error=str(e))
@@ -357,8 +360,8 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
             symbol=session.symbol,
             contract_type=contract_type,
             stake=stake,
-            duration=5,
-            duration_unit="t",
+            duration=strat.trade_duration,
+            duration_unit=strat.trade_duration_unit,
         )
 
         trade = await trade_crud.create_trade(
@@ -367,8 +370,8 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
             contract_id=str(contract.get("contract_id")),
             symbol=session.symbol,
             contract_type=contract_type,
-            duration=5,
-            duration_unit="t",
+            duration=strat.trade_duration,
+            duration_unit=strat.trade_duration_unit,
             stake=stake,
             entry_price=contract.get("entry_spot"),
             payout=contract.get("payout"),

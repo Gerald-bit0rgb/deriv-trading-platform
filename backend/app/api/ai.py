@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_active_user, get_db
+from app.crud.strategy import get_strategy_settings
 from app.models.user import User
 from app.schemas.ai import AISignalResponse
 from app.services import trading_engine
@@ -21,15 +22,16 @@ router = APIRouter(prefix="/ai", tags=["AI Engine"])
 logger = get_logger(__name__)
 
 
-def _get_ai_engine(user_id: int) -> AIEngine:
-    """Retrieve the AI engine backed by the user's active Deriv client."""
+async def _get_engine(user_id: int, db: AsyncSession) -> AIEngine:
+    """Get AI engine with user's strategy settings loaded."""
     session = trading_engine.get_session(user_id)
     if session is None or session.client is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="No active trading session. Call POST /trading/start first.",
         )
-    return AIEngine(client=session.client)
+    strat = await get_strategy_settings(db, user_id)
+    return AIEngine(client=session.client, settings=strat)
 
 
 @router.get("/signal/{symbol}", response_model=AISignalResponse)
@@ -37,9 +39,10 @@ async def get_signal(
     symbol: str,
     granularity: int = Query(60, description="Candle granularity in seconds"),
     current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Generate a BUY / SELL / WAIT signal for *symbol*. Requires an active trading session."""
-    engine = _get_ai_engine(current_user.id)
+    """Generate a BUY / SELL / WAIT signal using your configured strategy settings."""
+    engine = await _get_engine(current_user.id, db)
     signal = await engine.analyse(symbol, granularity=granularity)
 
     logger.info(
@@ -69,14 +72,15 @@ async def get_batch_signals(
     symbols: List[str] = Body(..., examples=[["R_100", "R_50", "frxEURUSD"]]),
     granularity: int = Query(60),
     current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get AI signals for multiple symbols at once."""
+    """Get signals for up to 10 symbols at once using your strategy settings."""
     if len(symbols) > 10:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="Maximum 10 symbols per batch request",
         )
-    engine = _get_ai_engine(current_user.id)
+    engine = await _get_engine(current_user.id, db)
     results = await engine.batch_analyse(symbols, granularity=granularity)
 
     return [
@@ -106,8 +110,8 @@ async def ai_auto_trade(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Ask the AI to analyse and automatically execute a trade if confident enough."""
-    engine = _get_ai_engine(current_user.id)
+    """Analyse market and execute a trade if confident enough."""
+    engine = await _get_engine(current_user.id, db)
     signal = await engine.analyse(symbol, granularity=granularity)
 
     if signal.signal == "WAIT":

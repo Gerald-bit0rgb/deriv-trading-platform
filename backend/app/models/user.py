@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.trade import Trade
     from app.models.risk_settings import RiskSettings
     from app.models.notification import Notification
+    from app.models.strategy_settings import StrategySettings
 
 
 class User(Base):
@@ -51,6 +52,9 @@ class User(Base):
     )
     notifications: Mapped[List["Notification"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+    strategy_settings: Mapped[Optional["StrategySettings"]] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
