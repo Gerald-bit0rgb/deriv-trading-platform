@@ -405,7 +405,8 @@ class _AccountTypeSwitcher extends ConsumerWidget {
   void _confirmReal(BuildContext context, WidgetRef ref) {
     showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      useRootNavigator: true,
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Switch to Real Account'),
         content: const Text(
           'You are about to switch to REAL MONEY trading.\n\n'
@@ -414,19 +415,19 @@ class _AccountTypeSwitcher extends ConsumerWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Stay on Demo'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style:
-                ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.danger),
             child: const Text('Switch to Real'),
           ),
         ],
       ),
     ).then((confirmed) {
-      if (confirmed == true) {
+      if (confirmed == true && ref.context.mounted) {
         ref.read(accountTypeProvider.notifier).setType('real');
       }
     });
