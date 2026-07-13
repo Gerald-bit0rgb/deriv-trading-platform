@@ -60,8 +60,11 @@ class AuthInterceptor extends Interceptor {
       final refreshToken = await storage.read(key: AppConstants.refreshTokenKey);
       if (refreshToken != null) {
         try {
+          // Use a longer timeout for refresh — server may be waking up from sleep
           final dio = Dio(BaseOptions(
             baseUrl: '${AppConstants.baseUrl}${AppConstants.apiPrefix}',
+            connectTimeout: const Duration(seconds: 60),
+            receiveTimeout: const Duration(seconds: 60),
           ));
           final response = await dio.post('/auth/refresh', data: {
             'refresh_token': refreshToken,
@@ -84,8 +87,11 @@ class AuthInterceptor extends Interceptor {
           handler.resolve(retryResponse);
           return;
         } catch (_) {
-          // Refresh failed — clear tokens (user will be redirected to login)
+          // Refresh failed — clear tokens so user is redirected to login
           await storage.deleteAll();
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(AppConstants.accessTokenKey);
+          await prefs.remove(AppConstants.refreshTokenKey);
         }
       }
     }
