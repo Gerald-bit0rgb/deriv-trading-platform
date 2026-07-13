@@ -61,6 +61,10 @@ class StrategySettings(Base):
     # Duration unit: t=ticks, s=seconds, m=minutes
     trade_duration_unit: Mapped[str] = mapped_column(String(5), default="t")
 
+    # ── Confirmation filter ───────────────────────────────────────────────────
+    # Require both current AND previous candle to be on the same side of fast MA
+    require_candle_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

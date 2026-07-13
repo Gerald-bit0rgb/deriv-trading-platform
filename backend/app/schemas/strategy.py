@@ -32,6 +32,7 @@ class StrategySettingsUpdate(BaseModel):
     # Trade duration
     trade_duration: int = Field(default=5, ge=1)
     trade_duration_unit: str = Field(default="t", description="t=ticks, s=seconds, m=minutes")
+    require_candle_confirmation: bool = Field(default=False, description="Require both current AND previous candle on same side of fast MA")
 
 
 class StrategySettingsResponse(StrategySettingsUpdate):

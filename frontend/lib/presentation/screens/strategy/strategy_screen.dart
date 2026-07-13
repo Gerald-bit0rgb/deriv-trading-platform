@@ -395,6 +395,32 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
 
         const SizedBox(height: 24),
 
+        // ── CANDLE CONFIRMATION SECTION ────────────────────────────────────
+        _SectionHeader(
+          title: 'CANDLE CONFIRMATION',
+          subtitle:
+              'Require 2 consecutive candles to confirm entry signal',
+          color: AppColors.accent,
+        ),
+        SwitchListTile(
+          title: const Text('Require 2-Candle Confirmation',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text(
+            'Both current AND previous candle must close on the same\n'
+            'side of the fast MA before entering a trade.\n'
+            'OFF = original EA logic (1 candle only)\n'
+            'ON = stricter filter, fewer but higher quality signals',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+          value: _settings!.requireCandleConfirmation,
+          onChanged: (v) => setState(() => _settings =
+              _settings!.copyWith(requireCandleConfirmation: v)),
+          activeColor: AppColors.accent,
+          contentPadding: EdgeInsets.zero,
+        ),
+
+        const SizedBox(height: 24),
+
         // ── TRADE DURATION SECTION ─────────────────────────────────────────
         _SectionHeader(
           title: 'TRADE DURATION',

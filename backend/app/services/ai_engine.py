@@ -162,6 +162,7 @@ class AIEngine:
         entry_price    = self._get("entry_applied_price", "TYPICAL")
         exit_enabled   = self._get("emergency_exit_enabled", True)
         exit_sma_p     = self._get("exit_sma_period", 50)
+        require_confirm = self._get("require_candle_confirmation", False)
         # Fetch 4H candles (bias timeframe)
         try:
             candles_4h = await self.client.get_candles(
@@ -251,11 +252,24 @@ class AIEngine:
 
         entry_fast     = ema_fast_15m[-2]
         entry_slow     = sma_slow_15m[-2]
-        close_15m_last = closes_15m[-2]
+        close_15m_last = closes_15m[-2]   # most recent closed candle
+        close_15m_prev = closes_15m[-3]   # candle before that
+        prev_fast      = ema_fast_15m[-3]  # fast MA on previous candle
 
         # ── Entry triggers ────────────────────────────────────────────────────
-        price_above_fast = close_15m_last > entry_fast
-        price_below_fast = close_15m_last < entry_fast
+        # Current candle closed above/below fast MA
+        cur_above = close_15m_last > entry_fast
+        cur_below = close_15m_last < entry_fast
+
+        if require_confirm:
+            # Both current AND previous candle must confirm — filters false signals
+            price_above_fast = cur_above and (close_15m_prev > prev_fast)
+            price_below_fast = cur_below and (close_15m_prev < prev_fast)
+        else:
+            # Original EA logic — only current candle needed
+            price_above_fast = cur_above
+            price_below_fast = cur_below
+
         buy_trigger  = (entry_fast > entry_slow) and price_above_fast
         sell_trigger = (entry_fast < entry_slow) and price_below_fast
 
@@ -271,22 +285,24 @@ class AIEngine:
         # ── Final signal ─────────────────────────────────────────────────────
         if bias_bull and buy_trigger:
             signal = "BUY"
+            conf_note = " (2-candle confirmed)" if require_confirm else ""
             reasons = [
                 f"{bias_tf_label} {bias_method}{bias_fast_p}({bias_fast:.5f}) > {bias_method}{bias_slow_p}({bias_slow:.5f}) — BULLISH",
                 f"ADX({adx_4h:.1f}) >= {adx_threshold}" if adx_enabled else "ADX filter disabled",
                 f"{entry_tf_label} {entry_fast_m}{entry_fast_p} > {entry_slow_m}{entry_slow_p}",
-                f"Candle closed above {entry_fast_m}{entry_fast_p} ({close_15m_last:.5f})",
+                f"Candle(s) closed above {entry_fast_m}{entry_fast_p}{conf_note}",
             ]
             confidence = self._calc_confidence(adx_4h, bias_fast, bias_slow, entry_fast, entry_slow, adx_threshold)
             trend = "BULLISH"
 
         elif bias_bear and sell_trigger:
             signal = "SELL"
+            conf_note = " (2-candle confirmed)" if require_confirm else ""
             reasons = [
                 f"{bias_tf_label} {bias_method}{bias_fast_p}({bias_fast:.5f}) < {bias_method}{bias_slow_p}({bias_slow:.5f}) — BEARISH",
                 f"ADX({adx_4h:.1f}) >= {adx_threshold}" if adx_enabled else "ADX filter disabled",
                 f"{entry_tf_label} {entry_fast_m}{entry_fast_p} < {entry_slow_m}{entry_slow_p}",
-                f"Candle closed below {entry_fast_m}{entry_fast_p} ({close_15m_last:.5f})",
+                f"Candle(s) closed below {entry_fast_m}{entry_fast_p}{conf_note}",
             ]
             confidence = self._calc_confidence(adx_4h, bias_slow, bias_fast, entry_slow, entry_fast, adx_threshold)
             trend = "BEARISH"
