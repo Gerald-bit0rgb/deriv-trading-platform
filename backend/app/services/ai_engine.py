@@ -197,17 +197,24 @@ class AIEngine:
         # ── Applied price helpers ─────────────────────────────────────────────
         def _apply_price(o, h, lo, c, price_type: str) -> np.ndarray:
             p = price_type.upper()
-            if p == "OPEN":     return o
-            if p == "HIGH":     return h
-            if p == "LOW":      return lo
-            if p == "MEDIAN":   return (h + lo) / 2.0
-            if p == "TYPICAL":  return (h + lo + c) / 3.0
-            if p == "WEIGHTED": return (h + lo + c + c) / 4.0
+            if p == "OPEN":
+                return o
+            if p == "HIGH":
+                return h
+            if p == "LOW":
+                return lo
+            if p == "MEDIAN":
+                return (h + lo) / 2.0
+            if p == "TYPICAL":
+                return (h + lo + c) / 3.0
+            if p == "WEIGHTED":
+                return (h + lo + c + c) / 4.0
             return c  # default CLOSE
 
         def _apply_ma(prices: np.ndarray, period: int, method: str) -> np.ndarray:
             m = method.upper()
-            if m == "SMA":  return _sma(prices, period)
+            if m == "SMA":
+                return _sma(prices, period)
             if m == "WMA":
                 result = np.zeros_like(prices)
                 for i in range(period - 1, len(prices)):
