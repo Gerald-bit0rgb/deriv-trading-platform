@@ -257,25 +257,20 @@ class AIEngine:
         close_15m_prev2 = closes_15m[-4]   # candle before that
 
         # ── Entry triggers ────────────────────────────────────────────────────
-        # Current candle closed above/below fast MA
-        cur_above = close_15m_last > entry_fast
-        cur_below = close_15m_last < entry_fast
-
         if require_confirm:
-            # Higher close confirmation:
-            # Previous candle close must be HIGHER than the candle before it → upward momentum
-            # Previous candle close must be LOWER than the candle before it → downward momentum
-            higher_close = close_15m_prev > close_15m_prev2   # previous made a higher close
-            lower_close  = close_15m_prev < close_15m_prev2   # previous made a lower close
-            price_above_fast = cur_above and higher_close
-            price_below_fast = cur_below and lower_close
+            # YOUR LOGIC:
+            # For BUY:  previous candle close > candle before it (higher close = upward momentum)
+            # For SELL: previous candle close < candle before it (lower close = downward momentum)
+            # The current forming candle is ignored completely
+            # 4H bias must still agree
+            buy_trigger  = (entry_fast > entry_slow) and (close_15m_prev > close_15m_prev2)
+            sell_trigger = (entry_fast < entry_slow) and (close_15m_prev < close_15m_prev2)
         else:
-            # Original EA logic — only current candle position vs EMA needed
-            price_above_fast = cur_above
-            price_below_fast = cur_below
-
-        buy_trigger  = (entry_fast > entry_slow) and price_above_fast
-        sell_trigger = (entry_fast < entry_slow) and price_below_fast
+            # Original EA logic — current closed candle must be above/below fast MA
+            price_above_fast = close_15m_last > entry_fast
+            price_below_fast = close_15m_last < entry_fast
+            buy_trigger  = (entry_fast > entry_slow) and price_above_fast
+            sell_trigger = (entry_fast < entry_slow) and price_below_fast
 
         # ── Timeframe labels for display ──────────────────────────────────────
         tf_labels = {
@@ -289,24 +284,30 @@ class AIEngine:
         # ── Final signal ─────────────────────────────────────────────────────
         if bias_bull and buy_trigger:
             signal = "BUY"
-            conf_note = f" | Prev close {close_15m_prev:.5f} > {close_15m_prev2:.5f} (higher close ✓)" if require_confirm else ""
+            if require_confirm:
+                conf_note = f"Prev close ({close_15m_prev:.5f}) > prev-prev ({close_15m_prev2:.5f}) — higher close ✓"
+            else:
+                conf_note = f"Current close ({close_15m_last:.5f}) above {entry_fast_m}{entry_fast_p}"
             reasons = [
                 f"{bias_tf_label} {bias_method}{bias_fast_p} > {bias_method}{bias_slow_p} — BULLISH",
                 f"ADX({adx_4h:.1f}) >= {adx_threshold}" if adx_enabled else "ADX filter disabled",
                 f"{entry_tf_label} {entry_fast_m}{entry_fast_p} > {entry_slow_m}{entry_slow_p}",
-                f"Current close ({close_15m_last:.5f}) above {entry_fast_m}{entry_fast_p}{conf_note}",
+                conf_note,
             ]
             confidence = self._calc_confidence(adx_4h, bias_fast, bias_slow, entry_fast, entry_slow, adx_threshold)
             trend = "BULLISH"
 
         elif bias_bear and sell_trigger:
             signal = "SELL"
-            conf_note = f" | Prev close {close_15m_prev:.5f} < {close_15m_prev2:.5f} (lower close ✓)" if require_confirm else ""
+            if require_confirm:
+                conf_note = f"Prev close ({close_15m_prev:.5f}) < prev-prev ({close_15m_prev2:.5f}) — lower close ✓"
+            else:
+                conf_note = f"Current close ({close_15m_last:.5f}) below {entry_fast_m}{entry_fast_p}"
             reasons = [
                 f"{bias_tf_label} {bias_method}{bias_fast_p} < {bias_method}{bias_slow_p} — BEARISH",
                 f"ADX({adx_4h:.1f}) >= {adx_threshold}" if adx_enabled else "ADX filter disabled",
                 f"{entry_tf_label} {entry_fast_m}{entry_fast_p} < {entry_slow_m}{entry_slow_p}",
-                f"Current close ({close_15m_last:.5f}) below {entry_fast_m}{entry_fast_p}{conf_note}",
+                conf_note,
             ]
             confidence = self._calc_confidence(adx_4h, bias_slow, bias_fast, entry_slow, entry_fast, adx_threshold)
             trend = "BEARISH"
@@ -318,13 +319,19 @@ class AIEngine:
             if not bias_bull and not bias_bear:
                 reasons.append(f"{bias_tf_label} MAs too close — no clear bias")
             if bias_bull and not buy_trigger:
-                if require_confirm and cur_above and not (close_15m_prev > close_15m_prev2):
-                    reasons.append(f"4H bullish but prev candle ({close_15m_prev:.5f}) did not make higher close vs ({close_15m_prev2:.5f})")
+                if require_confirm:
+                    reasons.append(
+                        f"4H bullish but prev candle close ({close_15m_prev:.5f}) "
+                        f"not higher than prev-prev ({close_15m_prev2:.5f})"
+                    )
                 else:
                     reasons.append(f"{bias_tf_label} bullish but {entry_tf_label} entry not confirmed")
             if bias_bear and not sell_trigger:
-                if require_confirm and cur_below and not (close_15m_prev < close_15m_prev2):
-                    reasons.append(f"4H bearish but prev candle ({close_15m_prev:.5f}) did not make lower close vs ({close_15m_prev2:.5f})")
+                if require_confirm:
+                    reasons.append(
+                        f"4H bearish but prev candle close ({close_15m_prev:.5f}) "
+                        f"not lower than prev-prev ({close_15m_prev2:.5f})"
+                    )
                 else:
                     reasons.append(f"{bias_tf_label} bearish but {entry_tf_label} entry not confirmed")
             if not reasons:
