@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../models/user_model.dart';
@@ -78,10 +79,15 @@ class AuthService {
   // ── Logout ─────────────────────────────────────────────────────────────────
   Future<void> logout() async {
     await _storage.deleteAll();
+    // Also clear SharedPreferences so background service knows session ended
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(AppConstants.accessTokenKey);
+    await prefs.remove(AppConstants.refreshTokenKey);
   }
 
   // ── Token helpers ──────────────────────────────────────────────────────────
   Future<void> _saveTokens(AuthResponse auth) async {
+    // Save to secure storage (used by the main app)
     await _storage.write(
       key: AppConstants.accessTokenKey,
       value: auth.accessToken,
@@ -90,6 +96,12 @@ class AuthService {
       key: AppConstants.refreshTokenKey,
       value: auth.refreshToken,
     );
+
+    // ALSO save to SharedPreferences so the background service isolate can read it
+    // Background isolate cannot access FlutterSecureStorage
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.accessTokenKey, auth.accessToken);
+    await prefs.setString(AppConstants.refreshTokenKey, auth.refreshToken);
   }
 
   Future<bool> get isLoggedIn async {

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 
@@ -69,6 +70,11 @@ class AuthInterceptor extends Interceptor {
           final newRefresh = response.data['refresh_token'] as String;
           await storage.write(key: AppConstants.accessTokenKey, value: newToken);
           await storage.write(key: AppConstants.refreshTokenKey, value: newRefresh);
+
+          // Also update SharedPreferences so background service stays in sync
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(AppConstants.accessTokenKey, newToken);
+          await prefs.setString(AppConstants.refreshTokenKey, newRefresh);
 
           // Retry original request with new token
           err.requestOptions.headers['Authorization'] = 'Bearer $newToken';
