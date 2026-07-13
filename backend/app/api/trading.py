@@ -61,6 +61,11 @@ async def start_bot(
         symbol=symbol,
         account_type=account_type,
     )
+
+    # Persist bot state so it can auto-restart after server restart
+    from app.crud.bot_session import save_bot_started
+    await save_bot_started(db, user_id, symbol, account_type)
+
     logger.info("trading.start_requested", user_id=user_id, status=new_status,
                 symbol=symbol, account_type=account_type)
     return {"status": new_status, "message": "Trading bot started",
@@ -82,9 +87,14 @@ async def resume_bot(current_user: User = Depends(get_current_active_user)):
 
 
 @router.post("/stop")
-async def stop_bot(current_user: User = Depends(get_current_active_user)):
+async def stop_bot(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Stop the bot and disconnect from Deriv."""
+    from app.crud.bot_session import save_bot_stopped
     new_status = await trading_engine.stop_trading(current_user.id)
+    await save_bot_stopped(db, current_user.id)
     logger.info("trading.stop_requested", user_id=current_user.id)
     return {"status": new_status, "message": "Trading bot stopped"}
 

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.risk_settings import RiskSettings
     from app.models.notification import Notification
     from app.models.strategy_settings import StrategySettings
+    from app.models.bot_session import BotSession
 
 
 class User(Base):
@@ -54,6 +55,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     strategy_settings: Mapped[Optional["StrategySettings"]] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    bot_session: Mapped[Optional["BotSession"]] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
 

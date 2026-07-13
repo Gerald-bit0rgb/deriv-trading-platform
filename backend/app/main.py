@@ -45,6 +45,44 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("app.database_ready")
 
+    # Auto-restart any bots that were running before the last server restart
+    try:
+        from app.crud.bot_session import get_all_active_sessions
+        from app.crud.user import get_user_by_id
+        from app.services.trading_engine import start_trading_with_token
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as db:
+            active_sessions = await get_all_active_sessions(db)
+            if active_sessions:
+                logger.info("app.auto_restart_bots", count=len(active_sessions))
+                for bot in active_sessions:
+                    try:
+                        user = await get_user_by_id(db, bot.user_id)
+                        if user and user.deriv_api_token:
+                            await start_trading_with_token(
+                                user_id=user.id,
+                                api_token=user.deriv_api_token,
+                                username=user.username,
+                                fcm_token=user.fcm_token,
+                                db_factory=async_session_factory,
+                                symbol=bot.symbol,
+                                account_type=bot.account_type,
+                            )
+                            logger.info(
+                                "app.bot_restarted",
+                                user_id=user.id,
+                                symbol=bot.symbol,
+                            )
+                    except Exception as e:
+                        logger.error(
+                            "app.bot_restart_failed",
+                            user_id=bot.user_id,
+                            error=str(e),
+                        )
+    except Exception as e:
+        logger.warning("app.auto_restart_skipped", error=str(e))
+
     yield  # application runs here
 
     # Graceful shutdown — stop all active trading sessions
