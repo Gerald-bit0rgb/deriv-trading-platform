@@ -1,7 +1,7 @@
 """
 CRUD operations for the Watchlist model.
 """
-from typing import List, Optional
+from typing import List
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
