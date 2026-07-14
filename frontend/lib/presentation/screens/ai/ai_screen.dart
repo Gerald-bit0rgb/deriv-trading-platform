@@ -89,7 +89,6 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   @override
   Widget build(BuildContext context) {
     final botStatus = ref.watch(botStatusProvider);
-    final isRunning = botStatus == 'running';
 
     return Scaffold(
       appBar: AppBar(title: const Text('AI Signal Engine')),

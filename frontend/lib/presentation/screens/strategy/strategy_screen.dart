@@ -45,13 +45,6 @@ const _appliedPrices = [
   'CLOSE', 'OPEN', 'HIGH', 'LOW', 'MEDIAN', 'TYPICAL', 'WEIGHTED'
 ];
 
-const _durationUnits = [
-  {'label': 'Ticks',   'value': 't'},
-  {'label': 'Seconds', 'value': 's'},
-  {'label': 'Minutes', 'value': 'm'},
-  {'label': 'Hours',   'value': 'h'},
-];
-
 // ── Screen ─────────────────────────────────────────────────────────────────────
 
 class StrategyScreen extends ConsumerStatefulWidget {

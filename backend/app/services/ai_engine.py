@@ -179,12 +179,18 @@ class AIEngine:
 
         def _apply_price_arr(price_type: str) -> np.ndarray:
             p = price_type.upper()
-            if p == "OPEN":     return opens
-            if p == "HIGH":     return highs
-            if p == "LOW":      return lows
-            if p == "MEDIAN":   return (highs + lows) / 2.0
-            if p == "TYPICAL":  return (highs + lows + closes) / 3.0
-            if p == "WEIGHTED": return (highs + lows + closes + closes) / 4.0
+            if p == "OPEN":
+                return opens
+            if p == "HIGH":
+                return highs
+            if p == "LOW":
+                return lows
+            if p == "MEDIAN":
+                return (highs + lows) / 2.0
+            if p == "TYPICAL":
+                return (highs + lows + closes) / 3.0
+            if p == "WEIGHTED":
+                return (highs + lows + closes + closes) / 4.0
             return closes
 
         def _apply_ma_arr(prices: np.ndarray, period: int, method: str) -> np.ndarray:
