@@ -509,23 +509,91 @@ async def _monitor_loop(session: UserSession) -> None:
 
 
 async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
-    """Check each open trade and close in DB if Deriv reports it finished."""
+    """
+    Check each open trade:
+    1. MA cross exit — if enabled and MAs cross against position → sell early
+    2. Trade status sync — if contract expired on Deriv → close in DB
+    """
+    from app.services.ai_engine import AIEngine
+    from app.crud.strategy import get_strategy_settings
+
     open_trades = await trade_crud.get_open_trades(db, session.user_id)
     if not open_trades:
         return
 
+    # Load strategy settings to check if MA cross exit is enabled
+    strat = await get_strategy_settings(db, session.user_id)
+    ma_exit_enabled = getattr(strat, "ma_cross_exit_enabled", False)
+
     for trade in open_trades:
         if not trade.contract_id:
             continue
+
+        # ── Priority 1: MA Cross Exit ──────────────────────────────────────
+        if ma_exit_enabled and session.client:
+            try:
+                engine = AIEngine(client=session.client, settings=strat)
+                position_type = "BUY" if trade.contract_type == "CALL" else "SELL"
+                should_exit, exit_reason = await engine.check_ma_cross_exit(
+                    trade.symbol, position_type
+                )
+                if should_exit:
+                    logger.info(
+                        "monitor.ma_cross_exit",
+                        trade_id=trade.id,
+                        reason=exit_reason,
+                    )
+                    try:
+                        sell_info = await session.client.sell_contract(
+                            int(trade.contract_id)
+                        )
+                        sold_for = float(sell_info.get("sold_for", 0))
+                        profit = sold_for - trade.stake
+                        await trade_crud.close_trade(
+                            db,
+                            trade=trade,
+                            exit_price=float(sell_info.get("exit_spot", 0)),
+                            profit=profit,
+                            payout=sold_for,
+                        )
+                        await _notify_trade_close_by_id(
+                            session.user_id, session.fcm_token, trade, db
+                        )
+                        await _send_notif(
+                            session, db, "ma_cross_exit",
+                            "MA Cross Exit",
+                            f"{trade.contract_type} on {trade.symbol} closed — {exit_reason}",
+                        )
+                        await db.commit()
+                        continue  # trade closed — skip status check
+                    except Exception as e:
+                        logger.warning(
+                            "monitor.ma_cross_sell_failed",
+                            trade_id=trade.id,
+                            error=str(e),
+                        )
+            except Exception as e:
+                logger.warning(
+                    "monitor.ma_cross_check_failed",
+                    trade_id=trade.id,
+                    error=str(e),
+                )
+
+        # ── Priority 2: Contract status sync (duration expired) ───────────
         try:
-            details = await session.client.get_contract_details(int(trade.contract_id))
+            details = await session.client.get_contract_details(
+                int(trade.contract_id)
+            )
             status = details.get("status")
 
             if status in ("won", "lost", "sold"):
                 profit = float(details.get("profit", 0))
-                payout = float(details.get("sell_price") or details.get("bid_price") or 0)
-                exit_price = float(details.get("exit_tick") or details.get("sell_spot") or 0)
-
+                payout = float(
+                    details.get("sell_price") or details.get("bid_price") or 0
+                )
+                exit_price = float(
+                    details.get("exit_tick") or details.get("sell_spot") or 0
+                )
                 await trade_crud.close_trade(
                     db,
                     trade=trade,
@@ -544,7 +612,9 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                     profit=profit,
                 )
         except Exception as e:
-            logger.warning("monitor.check_failed", trade_id=trade.id, error=str(e))
+            logger.warning(
+                "monitor.check_failed", trade_id=trade.id, error=str(e)
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

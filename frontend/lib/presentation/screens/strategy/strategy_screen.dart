@@ -14,17 +14,29 @@ final strategyProvider =
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
+// Candle timeframes — all Deriv-supported granularities
 const _timeframes = [
-  {'label': '1 Minute',  'value': 60},
-  {'label': '5 Minutes', 'value': 300},
-  {'label': '10 Minutes','value': 600},
-  {'label': '15 Minutes','value': 900},
-  {'label': '30 Minutes','value': 1800},
-  {'label': '1 Hour',    'value': 3600},
-  {'label': '2 Hours',   'value': 7200},
-  {'label': '4 Hours',   'value': 14400},
-  {'label': '8 Hours',   'value': 28800},
-  {'label': '1 Day',     'value': 86400},
+  {'label': '1 Minute',   'value': 60},
+  {'label': '2 Minutes',  'value': 120},
+  {'label': '3 Minutes',  'value': 180},
+  {'label': '5 Minutes',  'value': 300},
+  {'label': '10 Minutes', 'value': 600},
+  {'label': '15 Minutes', 'value': 900},
+  {'label': '30 Minutes', 'value': 1800},
+  {'label': '1 Hour',     'value': 3600},
+  {'label': '2 Hours',    'value': 7200},
+  {'label': '4 Hours',    'value': 14400},
+  {'label': '8 Hours',    'value': 28800},
+  {'label': '1 Day',      'value': 86400},
+];
+
+// Trade duration units — all Deriv-supported
+const _durationUnits = [
+  {'label': 'Ticks',   'value': 't'},
+  {'label': 'Seconds', 'value': 's'},
+  {'label': 'Minutes', 'value': 'm'},
+  {'label': 'Hours',   'value': 'h'},
+  {'label': 'Days',    'value': 'd'},
 ];
 
 const _maMethods = ['EMA', 'SMA', 'WMA', 'SMMA'];
@@ -421,6 +433,49 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
           activeColor: AppColors.accent,
           contentPadding: EdgeInsets.zero,
         ),
+
+        const SizedBox(height: 24),
+
+        // ── MA CROSS EXIT SECTION ──────────────────────────────────────────
+        _SectionHeader(
+          title: 'MA CROSS EXIT',
+          subtitle: 'Close trade early when entry MAs cross against position',
+          color: AppColors.primary,
+        ),
+        SwitchListTile(
+          title: const Text('Enable MA Cross Exit',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text(
+            'Priority 1 — fires before duration expires\n\n'
+            'BUY trade open:\n'
+            '  → When EMA(fast) crosses BELOW SMA(slow) → sell early\n\n'
+            'SELL trade open:\n'
+            '  → When EMA(fast) crosses ABOVE SMA(slow) → sell early\n\n'
+            'Uses the same MAs you set in Entry section above.\n'
+            'Duration becomes a safety net if no cross fires.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+          value: _settings!.maCrossExitEnabled,
+          onChanged: (v) => setState(() =>
+              _settings = _settings!.copyWith(maCrossExitEnabled: v)),
+          activeColor: AppColors.primary,
+          contentPadding: EdgeInsets.zero,
+        ),
+        if (_settings!.maCrossExitEnabled)
+          Container(
+            padding: const EdgeInsets.all(10),
+            margin: const EdgeInsets.only(top: 8),
+            decoration: BoxDecoration(
+              color: AppColors.info.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.info.withOpacity(0.3)),
+            ),
+            child: const Text(
+              'Tip: Set a longer trade duration (e.g. 30 minutes or 1 hour) '
+              'as a safety net. The MA cross will exit early in most cases.',
+              style: TextStyle(fontSize: 12, color: AppColors.info),
+            ),
+          ),
 
         const SizedBox(height: 24),
 

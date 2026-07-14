@@ -36,6 +36,10 @@ async def init_db() -> None:
             SET require_candle_confirmation = FALSE
             WHERE require_candle_confirmation = TRUE
             """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS ma_cross_exit_enabled BOOLEAN DEFAULT FALSE
+            """,
         ]
         for sql in migrations:
             try:

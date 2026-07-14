@@ -134,13 +134,104 @@ class AIEngine:
 
     def __init__(self, client: DerivClient, settings=None):
         self.client = client
-        self._s = settings  # StrategySettings ORM object or None (uses defaults)
+        self._s = settings
 
     def _get(self, attr: str, default):
-        """Get setting value from DB settings or fall back to default."""
         if self._s is not None:
             return getattr(self._s, attr, default)
         return default
+
+    async def check_ma_cross_exit(
+        self, symbol: str, position_type: str
+    ) -> tuple[bool, str]:
+        """
+        Check if the entry MAs have crossed against an open position.
+
+        :param symbol: trading symbol e.g. R_100
+        :param position_type: 'BUY' or 'SELL'
+        :returns: (should_exit, reason)
+
+        Logic (same MAs used for entry):
+          BUY position  → exit when EMA(fast) crosses BELOW SMA(slow)
+          SELL position → exit when EMA(fast) crosses ABOVE SMA(slow)
+        """
+        entry_tf     = self._get("entry_timeframe", 900)
+        entry_fast_p = self._get("entry_fast_period", 5)
+        entry_fast_m = self._get("entry_fast_method", "EMA")
+        entry_slow_p = self._get("entry_slow_period", 50)
+        entry_slow_m = self._get("entry_slow_method", "SMA")
+        entry_price  = self._get("entry_applied_price", "TYPICAL")
+
+        try:
+            candles = await self.client.get_candles(
+                symbol, granularity=entry_tf, count=60
+            )
+        except Exception as e:
+            return False, f"candle fetch failed: {e}"
+
+        if len(candles) < entry_slow_p + 2:
+            return False, "not enough candles"
+
+        opens  = np.array([float(c["open"])  for c in candles])
+        highs  = np.array([float(c["high"])  for c in candles])
+        lows   = np.array([float(c["low"])   for c in candles])
+        closes = np.array([float(c["close"]) for c in candles])
+
+        def _apply_price_arr(price_type: str) -> np.ndarray:
+            p = price_type.upper()
+            if p == "OPEN":     return opens
+            if p == "HIGH":     return highs
+            if p == "LOW":      return lows
+            if p == "MEDIAN":   return (highs + lows) / 2.0
+            if p == "TYPICAL":  return (highs + lows + closes) / 3.0
+            if p == "WEIGHTED": return (highs + lows + closes + closes) / 4.0
+            return closes
+
+        def _apply_ma_arr(prices: np.ndarray, period: int, method: str) -> np.ndarray:
+            m = method.upper()
+            if m == "SMA":
+                return _sma(prices, period)
+            return _ema(prices, period)
+
+        price_arr  = _apply_price_arr(entry_price)
+        fast_arr   = _apply_ma_arr(price_arr, entry_fast_p, entry_fast_m)
+        slow_arr   = _apply_ma_arr(price_arr, entry_slow_p, entry_slow_m)
+
+        # Last two closed bars (index -2 = last closed, index -3 = one before)
+        fast_now  = fast_arr[-2]
+        slow_now  = slow_arr[-2]
+        fast_prev = fast_arr[-3]
+        slow_prev = slow_arr[-3]
+
+        tf_labels = {
+            60: "1M", 300: "5M", 600: "10M", 900: "15M",
+            1800: "30M", 3600: "1H", 7200: "2H", 14400: "4H",
+            28800: "8H", 86400: "1D",
+        }
+        tf_label = tf_labels.get(entry_tf, f"{entry_tf}s")
+
+        if position_type == "BUY":
+            # BUY exit: fast MA crosses BELOW slow MA
+            # Previous: fast > slow  →  Current: fast < slow  = bearish cross
+            if fast_prev >= slow_prev and fast_now < slow_now:
+                return (
+                    True,
+                    f"MA cross exit: {tf_label} {entry_fast_m}{entry_fast_p}"
+                    f"({fast_now:.5f}) crossed below {entry_slow_m}{entry_slow_p}"
+                    f"({slow_now:.5f}) — closing BUY",
+                )
+        elif position_type == "SELL":
+            # SELL exit: fast MA crosses ABOVE slow MA
+            # Previous: fast < slow  →  Current: fast > slow  = bullish cross
+            if fast_prev <= slow_prev and fast_now > slow_now:
+                return (
+                    True,
+                    f"MA cross exit: {tf_label} {entry_fast_m}{entry_fast_p}"
+                    f"({fast_now:.5f}) crossed above {entry_slow_m}{entry_slow_p}"
+                    f"({slow_now:.5f}) — closing SELL",
+                )
+
+        return False, "no cross"
 
     async def analyse(self, symbol: str, granularity: int = 60) -> Signal:
         """Full MA Bias Basket analysis using configured or default parameters."""

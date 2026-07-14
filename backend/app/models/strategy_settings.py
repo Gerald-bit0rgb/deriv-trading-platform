@@ -62,8 +62,11 @@ class StrategySettings(Base):
     trade_duration_unit: Mapped[str] = mapped_column(String(5), default="t")
 
     # ── Confirmation filter ───────────────────────────────────────────────────
-    # Require both current AND previous candle to be on the same side of fast MA
     require_candle_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # ── MA Cross Exit ─────────────────────────────────────────────────────────
+    # Close trade early when entry MAs cross against the open position
+    ma_cross_exit_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

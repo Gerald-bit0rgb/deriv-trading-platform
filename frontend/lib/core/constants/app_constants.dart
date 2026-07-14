@@ -90,8 +90,6 @@ class AppConstants {
     {'label': 'Hours',   'value': 'h'},
     {'label': 'Days',    'value': 'd'},
   ];
-
-  // ── Dashboard refresh ──────────────────────────────────────────────────────
   static const Duration dashboardRefreshInterval = Duration(seconds: 10);
 
   // ── Pagination ────────────────────────────────────────────────────────────

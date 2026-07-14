@@ -30,7 +30,8 @@ class StrategySettingsModel {
   // Trade duration
   final int tradeDuration;
   final String tradeDurationUnit;
-  final bool requireCandleConfirmation;  // t=ticks, s=seconds, m=minutes
+  final bool requireCandleConfirmation;
+  final bool maCrossExitEnabled;  // t=ticks, s=seconds, m=minutes
 
   const StrategySettingsModel({
     this.id = 0,
@@ -54,6 +55,7 @@ class StrategySettingsModel {
     this.tradeDuration = 5,
     this.tradeDurationUnit = 't',
     this.requireCandleConfirmation = false,
+    this.maCrossExitEnabled = false,
   });
 
   factory StrategySettingsModel.fromJson(Map<String, dynamic> json) {
@@ -80,6 +82,8 @@ class StrategySettingsModel {
       tradeDurationUnit: json['trade_duration_unit'] as String? ?? 't',
       requireCandleConfirmation:
           json['require_candle_confirmation'] as bool? ?? false,
+      maCrossExitEnabled:
+          json['ma_cross_exit_enabled'] as bool? ?? false,
     );
   }
 
@@ -103,6 +107,7 @@ class StrategySettingsModel {
         'trade_duration': tradeDuration,
         'trade_duration_unit': tradeDurationUnit,
         'require_candle_confirmation': requireCandleConfirmation,
+        'ma_cross_exit_enabled': maCrossExitEnabled,
       };
 
   StrategySettingsModel copyWith({
@@ -125,6 +130,7 @@ class StrategySettingsModel {
     int? tradeDuration,
     String? tradeDurationUnit,
     bool? requireCandleConfirmation,
+    bool? maCrossExitEnabled,
   }) {
     return StrategySettingsModel(
       id: id,
@@ -149,6 +155,7 @@ class StrategySettingsModel {
       tradeDurationUnit: tradeDurationUnit ?? this.tradeDurationUnit,
       requireCandleConfirmation:
           requireCandleConfirmation ?? this.requireCandleConfirmation,
+      maCrossExitEnabled: maCrossExitEnabled ?? this.maCrossExitEnabled,
     );
   }
 }
