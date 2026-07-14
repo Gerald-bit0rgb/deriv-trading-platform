@@ -198,14 +198,6 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
                 onChanged: (v) => setState(() =>
                     _settings = _settings!.copyWith(dailyProfitTarget: v)),
               ),
-              _SliderTile(
-                label: 'Max Daily Trades',
-                value: _settings!.maxDailyTrades.toDouble(),
-                min: 1, max: 100, divisions: 99,
-                format: (v) => '${v.toInt()} trades',
-                onChanged: (v) => setState(() =>
-                    _settings = _settings!.copyWith(maxDailyTrades: v.toInt())),
-              ),
 
               const _SectionTitle('Concurrent Positions'),
               _SliderTile(

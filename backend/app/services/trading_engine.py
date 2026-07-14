@@ -356,10 +356,8 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
         logger.info("strategy.basket_full", count=basket_count)
         return
 
-    # Check daily limits
+    # Check daily limits — no max_daily_trades check — bot trades until stopped
     summary = await trade_crud.get_daily_summary(db, session.user_id)
-    if summary["today_trades"] >= risk.max_daily_trades:
-        return
     if summary["today_profit"] <= -abs(risk.max_daily_loss):
         return
 
@@ -581,8 +579,6 @@ async def execute_trade(
         raise RuntimeError(f"Max open trades ({risk.max_open_trades}) already reached")
 
     summary = await trade_crud.get_daily_summary(db, user.id)
-    if summary["today_trades"] >= risk.max_daily_trades:
-        raise RuntimeError("Daily trade limit reached")
     if summary["today_profit"] <= -abs(risk.max_daily_loss):
         raise RuntimeError("Daily loss limit reached — trading stopped for today")
     if ai_confidence is not None and ai_confidence < risk.min_ai_confidence:
