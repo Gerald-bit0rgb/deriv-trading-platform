@@ -18,13 +18,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api import (
-    auth_router,
-    trading_router,
-    risk_router,
-    ai_router,
-    dashboard_router,
-    notifications_router,
-    strategy_router,
+    auth_router, trading_router, risk_router, ai_router,
+    dashboard_router, notifications_router, strategy_router, watchlist_router,
 )
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
@@ -175,6 +170,7 @@ app.include_router(ai_router,             prefix=PREFIX)
 app.include_router(dashboard_router,      prefix=PREFIX)
 app.include_router(notifications_router,  prefix=PREFIX)
 app.include_router(strategy_router,       prefix=PREFIX)
+app.include_router(watchlist_router,      prefix=PREFIX)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

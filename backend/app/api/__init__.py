@@ -6,13 +6,10 @@ from app.api.ai import router as ai_router
 from app.api.dashboard import router as dashboard_router
 from app.api.notifications import router as notifications_router
 from app.api.strategy import router as strategy_router
+from app.api.watchlist import router as watchlist_router
 
 __all__ = [
-    "auth_router",
-    "trading_router",
-    "risk_router",
-    "ai_router",
-    "dashboard_router",
-    "notifications_router",
-    "strategy_router",
+    "auth_router", "trading_router", "risk_router", "ai_router",
+    "dashboard_router", "notifications_router", "strategy_router",
+    "watchlist_router",
 ]

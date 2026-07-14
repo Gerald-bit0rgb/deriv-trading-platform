@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from app.models.notification import Notification
     from app.models.strategy_settings import StrategySettings
     from app.models.bot_session import BotSession
+    from app.models.watchlist import WatchlistItem
 
 
 class User(Base):
@@ -59,6 +60,9 @@ class User(Base):
     )
     bot_session: Mapped[Optional["BotSession"]] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    watchlist: Mapped[List["WatchlistItem"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

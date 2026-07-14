@@ -10,6 +10,7 @@ class MainShell extends StatelessWidget {
     _NavTab(icon: Icons.dashboard_rounded, label: 'Dashboard', path: '/dashboard'),
     _NavTab(icon: Icons.candlestick_chart, label: 'Trade',     path: '/trading'),
     _NavTab(icon: Icons.auto_awesome,      label: 'AI',        path: '/ai'),
+    _NavTab(icon: Icons.playlist_add_check_rounded, label: 'Watchlist', path: '/watchlist'),
     _NavTab(icon: Icons.tune,              label: 'Strategy',  path: '/strategy'),
     _NavTab(icon: Icons.person_rounded,    label: 'Profile',   path: '/profile'),
   ];

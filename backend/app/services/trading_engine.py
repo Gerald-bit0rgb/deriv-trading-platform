@@ -218,39 +218,43 @@ async def _strategy_loop(session: UserSession) -> None:
 
 async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
     """
-    MA Bias Basket strategy execution for one bar check.
+    MA Bias Basket strategy — multi-symbol watchlist edition.
 
-    Steps:
-      1. Check if a new 15M bar has formed
-      2. Run AI engine analysis
-      3. Check basket profit → close if target reached
-      4. Emergency exit check (SMA50 only)
-      5. Place new trade if signal aligns and basket allows
+    Every new bar:
+      1. Load user's watchlist symbols (defaults: R_100, R_75, R_50)
+      2. Use first symbol as the timing clock for new-bar detection
+      3. Check basket profit across ALL open trades → close all if target hit
+      4. Emergency exit check
+      5. For every watchlist symbol → analyse and trade if signal qualifies
+         (one open trade per symbol at a time)
     """
     from app.services.ai_engine import AIEngine
     from app.crud.strategy import get_strategy_settings as get_strat
+    from app.crud.watchlist import get_watchlist_symbols
 
     if session.client is None:
         return
 
-    # Load strategy settings for this user
+    # ── Settings ──────────────────────────────────────────────────────────────
     strat = await get_strat(db, session.user_id)
-    engine = AIEngine(client=session.client, settings=strat)
-
-    # ── Get risk settings ─────────────────────────────────────────────────────
-    risk = await get_or_create_risk_settings(db, session.user_id)
+    risk  = await get_or_create_risk_settings(db, session.user_id)
 
     if risk.emergency_stop or not risk.trading_enabled:
         return
 
-    # ── Check for new bar on entry timeframe ─────────────────────────────────
+    # ── Load watchlist symbols ────────────────────────────────────────────────
+    symbols = await get_watchlist_symbols(db, session.user_id)
+    # symbols is never empty — get_watchlist_symbols returns DEFAULT_SYMBOLS
+
+    # ── New-bar check using the first symbol as clock ────────────────────────
+    clock_symbol = symbols[0]
     try:
         candles = await session.client.get_candles(
-            session.symbol, granularity=strat.entry_timeframe, count=5
+            clock_symbol, granularity=strat.entry_timeframe, count=5
         )
         if not candles:
             logger.warning("strategy.no_candles_returned",
-                           user_id=session.user_id, symbol=session.symbol)
+                           user_id=session.user_id, symbol=clock_symbol)
             return
         current_bar_epoch = int(candles[-2].get("epoch", 0))
         if current_bar_epoch == session._last_bar_time:
@@ -260,125 +264,161 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
         logger.info("strategy.new_bar_processing",
                     user_id=session.user_id,
                     epoch=current_bar_epoch,
-                    symbol=session.symbol)
+                    symbols=symbols)
     except Exception as e:
         logger.error("strategy.bar_check_failed",
                      user_id=session.user_id,
-                     symbol=session.symbol,
+                     symbol=clock_symbol,
                      error=str(e))
         return
 
-    logger.info("strategy.new_bar", user_id=session.user_id, epoch=current_bar_epoch)
+    # ── Get all open trades once (shared across symbols) ─────────────────────
+    all_open = await trade_crud.get_open_trades(db, session.user_id)
+    basket_count = len(all_open)
 
-    # ── Get open trades ───────────────────────────────────────────────────────
-    open_trades = await trade_crud.get_open_trades(db, session.user_id)
-    basket_count = len(open_trades)
-
-    # ── Step 1: Basket profit check → close all if target reached ─────────────
+    # ── Basket profit check → close ALL if target reached ────────────────────
     if basket_count > 0:
-        total_profit = await _get_basket_profit(session, open_trades)
-        # Basket close target: max of $0.40 or 4x the default stake
+        total_profit = await _get_basket_profit(session, all_open)
         basket_close_usd = max(0.40, risk.default_stake * 4)
-
         if total_profit >= basket_close_usd:
-            await _close_all_basket(session, open_trades, db)
+            await _close_all_basket(session, all_open, db)
             await _send_notif(
                 session, db, "basket_close",
                 "Basket Closed — Profit Target",
                 f"Basket profit reached ${total_profit:.2f} — all trades closed",
             )
-            logger.info(
-                "strategy.basket_closed_profit",
-                user_id=session.user_id,
-                profit=total_profit,
-            )
+            logger.info("strategy.basket_closed_profit",
+                        user_id=session.user_id, profit=total_profit)
             return
 
-    # ── Step 2: Run AI analysis ────────────────────────────────────────────────
+    # ── Emergency exit check (uses first symbol signal) ───────────────────────
+    if basket_count > 0:
+        try:
+            engine_clock = AIEngine(client=session.client, settings=strat)
+            sig_clock = await engine_clock.analyse(clock_symbol, granularity=60)
+            if sig_clock.pattern and "Emergency Exit" in sig_clock.pattern:
+                basket_dir = _get_basket_direction(all_open)
+                should_exit = (
+                    (basket_dir == "BUY"  and sig_clock.signal != "BUY") or
+                    (basket_dir == "SELL" and sig_clock.signal != "SELL")
+                )
+                if should_exit:
+                    await _close_all_basket(session, all_open, db)
+                    await _send_notif(
+                        session, db, "emergency_exit",
+                        "Emergency Exit",
+                        f"Basket closed — {sig_clock.pattern}",
+                    )
+                    logger.info("strategy.emergency_exit",
+                                user_id=session.user_id, pattern=sig_clock.pattern)
+                    return
+        except Exception as e:
+            logger.warning("strategy.emergency_check_failed", error=str(e))
+
+    # ── Daily loss guard ─────────────────────────────────────────────────────
+    summary = await trade_crud.get_daily_summary(db, session.user_id)
+    if summary["today_profit"] <= -abs(risk.max_daily_loss):
+        logger.info("strategy.daily_loss_limit_reached", user_id=session.user_id)
+        return
+
+    # ── Symbols already holding an open trade ────────────────────────────────
+    open_symbols = {t.symbol for t in all_open}
+
+    # ── Scan every watchlist symbol and trade qualifying signals ─────────────
+    for symbol in symbols:
+        # Refresh open-trade count after each placement
+        current_open = await trade_crud.get_open_trades(db, session.user_id)
+        if len(current_open) >= risk.max_open_trades:
+            logger.info("strategy.basket_full",
+                        count=len(current_open), user_id=session.user_id)
+            break
+
+        await _analyse_and_trade_symbol(
+            session=session,
+            db=db,
+            symbol=symbol,
+            strat=strat,
+            risk=risk,
+            open_symbols=open_symbols,
+        )
+        # Update open_symbols after each trade attempt
+        refreshed = await trade_crud.get_open_trades(db, session.user_id)
+        open_symbols = {t.symbol for t in refreshed}
+
+
+async def _analyse_and_trade_symbol(
+    session: UserSession,
+    db: AsyncSession,
+    symbol: str,
+    strat,
+    risk,
+    open_symbols: set,
+) -> None:
+    """
+    Analyse one symbol and place a trade if the signal qualifies.
+
+    Rules:
+      - Skip if symbol already has an open trade
+      - Skip if signal is WAIT
+      - Skip if confidence is below user's min_ai_confidence threshold
+      - Skip if trade direction conflicts with any existing basket direction
+    """
+    from app.services.ai_engine import AIEngine
+
+    # One trade per symbol at a time
+    if symbol in open_symbols:
+        logger.info("strategy.symbol_already_open",
+                    user_id=session.user_id, symbol=symbol)
+        return
+
+    # Analyse
     try:
-        signal = await engine.analyse(session.symbol, granularity=60)
+        engine = AIEngine(client=session.client, settings=strat)
+        signal = await engine.analyse(symbol, granularity=60)
         logger.info(
             "strategy.analysis_result",
             user_id=session.user_id,
-            symbol=session.symbol,
+            symbol=symbol,
             signal=signal.signal,
             confidence=signal.confidence,
-            reason=signal.reason[:100] if signal.reason else "",
+            reason=signal.reason[:120] if signal.reason else "",
         )
     except Exception as e:
-        logger.error("strategy.analysis_failed", user_id=session.user_id, error=str(e))
+        logger.error("strategy.analysis_failed",
+                     user_id=session.user_id, symbol=symbol, error=str(e))
         return
 
-    logger.info(
-        "strategy.signal",
-        user_id=session.user_id,
-        signal=signal.signal,
-        confidence=signal.confidence,
-        reason=signal.reason,
-    )
-
-    # ── Step 3: Emergency exit (SMA50 only) ────────────────────────────────────
-    if basket_count > 0 and signal.pattern and "Emergency Exit" in signal.pattern:
-        basket_dir = _get_basket_direction(open_trades)
-        should_exit = (
-            (basket_dir == "BUY" and signal.signal != "BUY") or
-            (basket_dir == "SELL" and signal.signal != "SELL")
-        )
-        if should_exit:
-            await _close_all_basket(session, open_trades, db)
-            await _send_notif(
-                session, db, "emergency_exit",
-                "Emergency Exit",
-                f"Basket closed — {signal.pattern}",
-            )
-            logger.info(
-                "strategy.emergency_exit",
-                user_id=session.user_id,
-                pattern=signal.pattern,
-            )
-            return
-
-    # ── Step 4: Entry check ────────────────────────────────────────────────────
+    # Gate: WAIT
     if signal.signal == "WAIT":
         return
 
-    # Check confidence threshold
+    # Gate: confidence threshold (set by user in risk settings)
     if signal.confidence < risk.min_ai_confidence:
         logger.info(
             "strategy.confidence_too_low",
+            user_id=session.user_id,
+            symbol=symbol,
             confidence=signal.confidence,
-            min=risk.min_ai_confidence,
+            min_required=risk.min_ai_confidence,
         )
         return
 
-    # Check basket size limit
-    if basket_count >= risk.max_open_trades:
-        logger.info("strategy.basket_full", count=basket_count)
-        return
-
-    # Check daily limits — no max_daily_trades check — bot trades until stopped
-    summary = await trade_crud.get_daily_summary(db, session.user_id)
-    if summary["today_profit"] <= -abs(risk.max_daily_loss):
-        return
-
-    # Don't add trades in opposite direction to existing basket
-    if basket_count > 0:
-        basket_dir = _get_basket_direction(open_trades)
+    # Gate: don't mix BUY and SELL in the basket
+    all_open = await trade_crud.get_open_trades(db, session.user_id)
+    if all_open:
+        basket_dir = _get_basket_direction(all_open)
         if basket_dir and basket_dir != signal.signal:
-            logger.info(
-                "strategy.opposite_direction_blocked",
-                basket=basket_dir,
-                signal=signal.signal,
-            )
+            logger.info("strategy.opposite_direction_blocked",
+                        basket=basket_dir, signal=signal.signal, symbol=symbol)
             return
 
-    # ── Step 5: Place trade ───────────────────────────────────────────────────
+    # ── Place trade ───────────────────────────────────────────────────────────
     contract_type = "CALL" if signal.signal == "BUY" else "PUT"
     stake = risk.default_stake
 
     try:
         contract = await session.client.buy_contract(
-            symbol=session.symbol,
+            symbol=symbol,
             contract_type=contract_type,
             stake=stake,
             duration=strat.trade_duration,
@@ -389,7 +429,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
             db,
             user_id=session.user_id,
             contract_id=str(contract.get("contract_id")),
-            symbol=session.symbol,
+            symbol=symbol,
             contract_type=contract_type,
             duration=strat.trade_duration,
             duration_unit=strat.trade_duration_unit,
@@ -407,7 +447,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
         await _send_notif(
             session, db, "trade_open",
             f"Auto Trade Opened — {signal.signal}",
-            f"{contract_type} on {session.symbol} | Stake: ${stake} | "
+            f"{contract_type} on {symbol} | Stake: ${stake} | "
             f"Confidence: {int(signal.confidence * 100)}%",
         )
 
@@ -415,13 +455,15 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
             "strategy.trade_placed",
             user_id=session.user_id,
             trade_id=trade.id,
+            symbol=symbol,
             signal=signal.signal,
             confidence=signal.confidence,
             stake=stake,
         )
 
     except Exception as e:
-        logger.error("strategy.trade_failed", error=str(e))
+        logger.error("strategy.trade_failed",
+                     user_id=session.user_id, symbol=symbol, error=str(e))
 
 
 async def _get_basket_profit(session: UserSession, open_trades: List[Trade]) -> float:

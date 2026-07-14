@@ -12,7 +12,7 @@ from app.core.logging import get_logger
 from app.db.session import Base, engine
 
 # Import all models so SQLAlchemy knows about them
-from app.models import user, trade, risk_settings, notification, strategy_settings, bot_session  # noqa: F401
+from app.models import user, trade, risk_settings, notification, strategy_settings, bot_session, watchlist  # noqa: F401
 
 logger = get_logger(__name__)
 

@@ -12,6 +12,7 @@ import '../../presentation/screens/risk/risk_screen.dart';
 import '../../presentation/screens/notifications/notifications_screen.dart';
 import '../../presentation/screens/profile/profile_screen.dart';
 import '../../presentation/screens/strategy/strategy_screen.dart';
+import '../../presentation/screens/watchlist/watchlist_screen.dart';
 import '../../presentation/widgets/common/main_shell.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -41,6 +42,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/ai',            builder: (_, __) => const AiScreen()),
           GoRoute(path: '/risk',          builder: (_, __) => const RiskScreen()),
           GoRoute(path: '/strategy',      builder: (_, __) => const StrategyScreen()),
+          GoRoute(path: '/watchlist',     builder: (_, __) => const WatchlistScreen()),
           GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
           GoRoute(path: '/profile',       builder: (_, __) => const ProfileScreen()),
         ],
