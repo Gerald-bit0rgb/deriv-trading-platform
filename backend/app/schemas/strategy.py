@@ -1,46 +1,39 @@
 """
-Pydantic schemas for Strategy Settings endpoints.
+Pydantic schemas for 1-Minute Microtrading Strategy Settings endpoints.
 """
 from pydantic import BaseModel, Field
 
 
 class StrategySettingsUpdate(BaseModel):
-    # 4H Bias
-    bias_timeframe: int = Field(default=14400)
-    bias_fast_period: int = Field(default=5, ge=1, le=200)
-    bias_slow_period: int = Field(default=13, ge=1, le=200)
-    bias_ma_method: str = Field(default="EMA")
-    bias_applied_price: str = Field(default="CLOSE")
+    # ── 1M Entry Timeframe (hardcoded) ────────────────────────────────────────
+    entry_timeframe: int = Field(default=60, description="Always 1 minute (60 seconds)")
 
-    # ADX filter
-    adx_enabled: bool = True
-    adx_period: int = Field(default=14, ge=1, le=100)
-    adx_threshold: float = Field(default=20.0, ge=0, le=100)
+    # ── EMA 3 (fast entry signal) ─────────────────────────────────────────────
+    ema_fast_period: int = Field(default=3, ge=1, le=50)
+    ema_applied_price: str = Field(default="CLOSE")
 
-    # 15M Entry
-    entry_timeframe: int = Field(default=900)
-    entry_fast_period: int = Field(default=5, ge=1, le=200)
-    entry_fast_method: str = Field(default="EMA")
-    entry_slow_period: int = Field(default=50, ge=1, le=500)
-    entry_slow_method: str = Field(default="SMA")
-    entry_applied_price: str = Field(default="TYPICAL")
+    # ── Bollinger Bands 18 ────────────────────────────────────────────────────
+    bb_period: int = Field(default=18, ge=5, le=100)
+    bb_std_dev: float = Field(default=2.0, ge=0.5, le=5.0)
+    bb_method: str = Field(default="SMA", description="SMA or EMA")
 
-    # Emergency exit
-    emergency_exit_enabled: bool = True
-    exit_sma_period: int = Field(default=50, ge=1, le=500)
+    # ── MACD Histogram (9, 12, 26) ────────────────────────────────────────────
+    macd_fast: int = Field(default=12, ge=5, le=50)
+    macd_slow: int = Field(default=26, ge=10, le=100)
+    macd_signal: int = Field(default=9, ge=2, le=50)
 
-    # Trade duration
-    trade_duration: int = Field(default=5, ge=1)
-    trade_duration_unit: str = Field(default="t")
+    # ── RSI 14 ────────────────────────────────────────────────────────────────
+    rsi_period: int = Field(default=14, ge=2, le=50)
+    rsi_overbought: float = Field(default=70.0, ge=50, le=100)
+    rsi_oversold: float = Field(default=30.0, ge=0, le=50)
 
-    # Candle confirmation
-    require_candle_confirmation: bool = False
+    # ── Trade duration ───────────────────────────────────────────────────────
+    trade_duration: int = Field(default=2, ge=1, le=10, description="Duration in minutes")
+    trade_duration_unit: str = Field(default="m", description="m=minutes, t=ticks")
 
-    # MA Cross Exit — close trade early when entry MAs cross against position
-    ma_cross_exit_enabled: bool = Field(
-        default=False,
-        description="Close trade early when EMA(fast) crosses SMA(slow) against position",
-    )
+    # ── Risk management ──────────────────────────────────────────────────────
+    trailing_stop_enabled: bool = Field(default=True)
+    trailing_stop_distance: float = Field(default=2.0, ge=0.5, le=10.0, description="Distance in pips")
 
 
 class StrategySettingsResponse(StrategySettingsUpdate):
