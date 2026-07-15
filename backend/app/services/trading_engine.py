@@ -1,19 +1,19 @@
 """
-Trading Engine — MA Bias Basket Strategy
+Trading Engine — 1-Minute Microtrading Strategy
 
 Automated bot loop:
-  Every new 15M bar:
-    1. Run MA Bias Basket analysis (4H bias + 15M entry)
-    2. If BUY/SELL signal and basket allows → place trade
-    3. Check basket total profit → close all if >= InpBasketCloseUSD
-    4. Emergency exit → close all if 15M candle closes against SMA50
+  Every new 1M bar:
+    1. Run 1M microtrading analysis on all watchlist symbols
+    2. If BUY/SELL signal with high confidence → place trade
+    3. Check open trades for trailing stop hits or early exits
   Every 5 seconds:
-    5. Sync open trade statuses with Deriv
+    4. Sync open trade statuses with Deriv
+    5. Monitor trailing stops
 
 Settings (read from user's RiskSettings):
   default_stake       → lot size per entry
-  max_open_trades     → max basket size
-  daily_profit_target → basket close USD target
+  max_open_trades     → max concurrent positions
+  daily_profit_target → daily stop (optional)
 """
 import asyncio
 from enum import Enum
@@ -67,7 +67,7 @@ class UserSession:
         self.status: BotStatus = BotStatus.STOPPED
         self.monitor_task: Optional[asyncio.Task] = None
         self.strategy_task: Optional[asyncio.Task] = None
-        self._last_bar_time: Optional[int] = None   # last 15M bar epoch processed
+        self._last_bar_time: Optional[int] = None   # last 1M bar epoch processed
 
     async def connect(self) -> None:
         self.client = DerivClient(
@@ -84,7 +84,7 @@ class UserSession:
         logger.info("session.disconnected", user_id=self.user_id)
 
 
-# ── Session registry ──────────────────────────────────────────────────────────
+# ── Session registry ────────────────────────────────────────────────────────
 _sessions: Dict[int, UserSession] = {}
 
 
@@ -92,9 +92,9 @@ def get_session(user_id: int) -> Optional[UserSession]:
     return _sessions.get(user_id)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 # Engine control
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 
 async def start_trading_with_token(
     user_id: int,
@@ -134,7 +134,7 @@ async def start_trading_with_token(
         _monitor_loop(session), name=f"monitor-{user_id}"
     )
 
-    # Background task 2: run MA Bias Basket strategy on every new 15M bar
+    # Background task 2: run 1M microtrading strategy on every new 1M bar
     session.strategy_task = asyncio.create_task(
         _strategy_loop(session), name=f"strategy-{user_id}"
     )
@@ -189,14 +189,14 @@ def get_bot_status(user_id: int) -> str:
     return session.status if session else BotStatus.STOPPED
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MA Bias Basket Strategy Loop
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
+# 1M Microtrading Strategy Loop
+# ────────────────────────────────────────────────────────────────────────────
 
 async def _strategy_loop(session: UserSession) -> None:
     """
-    Runs the MA Bias Basket strategy on every new 15M bar.
-    Checks every 60 seconds for a new bar.
+    Runs the 1M microtrading strategy on every new 1M bar.
+    Checks every 30 seconds for a new bar.
     """
     logger.info("strategy.started", user_id=session.user_id)
 
@@ -204,29 +204,27 @@ async def _strategy_loop(session: UserSession) -> None:
         try:
             if session.status == BotStatus.RUNNING:
                 async with session.db_factory() as db:
-                    await _run_basket_strategy(session, db)
+                    await _run_microtrading_loop(session, db)
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error("strategy.error", user_id=session.user_id, error=str(e))
 
-        # Check every 60 seconds for a new 15M bar
-        await asyncio.sleep(60)
+        # Check every 30 seconds for a new 1M bar
+        await asyncio.sleep(30)
 
     logger.info("strategy.stopped", user_id=session.user_id)
 
 
-async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
+async def _run_microtrading_loop(session: UserSession, db: AsyncSession) -> None:
     """
-    MA Bias Basket strategy — multi-symbol watchlist edition.
+    1M Microtrading strategy — multi-symbol watchlist edition.
 
     Every new bar:
       1. Load user's watchlist symbols (defaults: R_100, R_75, R_50)
       2. Use first symbol as the timing clock for new-bar detection
-      3. Check basket profit across ALL open trades → close all if target hit
-      4. Emergency exit check
-      5. For every watchlist symbol → analyse and trade if signal qualifies
-         (one open trade per symbol at a time)
+      3. Scan every watchlist symbol and trade qualifying signals
+      4. Check open trades for exits (trailing stop or manual close)
     """
     from app.services.ai_engine import AIEngine
     from app.crud.strategy import get_strategy_settings as get_strat
@@ -237,7 +235,7 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
 
     # ── Settings ──────────────────────────────────────────────────────────────
     strat = await get_strat(db, session.user_id)
-    risk  = await get_or_create_risk_settings(db, session.user_id)
+    risk = await get_or_create_risk_settings(db, session.user_id)
 
     if risk.emergency_stop or not risk.trading_enabled:
         return
@@ -246,11 +244,11 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
     symbols = await get_watchlist_symbols(db, session.user_id)
     # symbols is never empty — get_watchlist_symbols returns DEFAULT_SYMBOLS
 
-    # ── New-bar check using the first symbol as clock ────────────────────────
+    # ── New-bar check using the first symbol as clock ──────────────────────
     clock_symbol = symbols[0]
     try:
         candles = await session.client.get_candles(
-            clock_symbol, granularity=strat.entry_timeframe, count=5
+            clock_symbol, granularity=60, count=5
         )
         if not candles:
             logger.warning("strategy.no_candles_returned",
@@ -272,64 +270,24 @@ async def _run_basket_strategy(session: UserSession, db: AsyncSession) -> None:
                      error=str(e))
         return
 
-    # ── Get all open trades once (shared across symbols) ─────────────────────
+    # ── Get all open trades once ───────────────────────────────────────────
     all_open = await trade_crud.get_open_trades(db, session.user_id)
-    basket_count = len(all_open)
 
-    # ── Basket profit check → close ALL if target reached ────────────────────
-    if basket_count > 0:
-        total_profit = await _get_basket_profit(session, all_open)
-        basket_close_usd = max(0.40, risk.default_stake * 4)
-        if total_profit >= basket_close_usd:
-            await _close_all_basket(session, all_open, db)
-            await _send_notif(
-                session, db, "basket_close",
-                "Basket Closed — Profit Target",
-                f"Basket profit reached ${total_profit:.2f} — all trades closed",
-            )
-            logger.info("strategy.basket_closed_profit",
-                        user_id=session.user_id, profit=total_profit)
-            return
-
-    # ── Emergency exit check (uses first symbol signal) ───────────────────────
-    if basket_count > 0:
-        try:
-            engine_clock = AIEngine(client=session.client, settings=strat)
-            sig_clock = await engine_clock.analyse(clock_symbol, granularity=60)
-            if sig_clock.pattern and "Emergency Exit" in sig_clock.pattern:
-                basket_dir = _get_basket_direction(all_open)
-                should_exit = (
-                    (basket_dir == "BUY"  and sig_clock.signal != "BUY") or
-                    (basket_dir == "SELL" and sig_clock.signal != "SELL")
-                )
-                if should_exit:
-                    await _close_all_basket(session, all_open, db)
-                    await _send_notif(
-                        session, db, "emergency_exit",
-                        "Emergency Exit",
-                        f"Basket closed — {sig_clock.pattern}",
-                    )
-                    logger.info("strategy.emergency_exit",
-                                user_id=session.user_id, pattern=sig_clock.pattern)
-                    return
-        except Exception as e:
-            logger.warning("strategy.emergency_check_failed", error=str(e))
-
-    # ── Daily loss guard ─────────────────────────────────────────────────────
+    # ── Daily loss guard ──────────────────────────────────────────────────
     summary = await trade_crud.get_daily_summary(db, session.user_id)
     if summary["today_profit"] <= -abs(risk.max_daily_loss):
         logger.info("strategy.daily_loss_limit_reached", user_id=session.user_id)
         return
 
-    # ── Symbols already holding an open trade ────────────────────────────────
+    # ── Symbols already holding an open trade ──────────────────────────────
     open_symbols = {t.symbol for t in all_open}
 
-    # ── Scan every watchlist symbol and trade qualifying signals ─────────────
+    # ── Scan every watchlist symbol and trade qualifying signals ─────────
     for symbol in symbols:
         # Refresh open-trade count after each placement
         current_open = await trade_crud.get_open_trades(db, session.user_id)
         if len(current_open) >= risk.max_open_trades:
-            logger.info("strategy.basket_full",
+            logger.info("strategy.max_trades_reached",
                         count=len(current_open), user_id=session.user_id)
             break
 
@@ -361,7 +319,6 @@ async def _analyse_and_trade_symbol(
       - Skip if symbol already has an open trade
       - Skip if signal is WAIT
       - Skip if confidence is below user's min_ai_confidence threshold
-      - Skip if trade direction conflicts with any existing basket direction
     """
     from app.services.ai_engine import AIEngine
 
@@ -381,7 +338,10 @@ async def _analyse_and_trade_symbol(
             symbol=symbol,
             signal=signal.signal,
             confidence=signal.confidence,
-            reason=signal.reason[:120] if signal.reason else "",
+            ema3=signal.ema3_value,
+            bb_mid=signal.bb_middle,
+            macd_hist=signal.macd_histogram,
+            rsi=signal.rsi_value,
         )
     except Exception as e:
         logger.error("strategy.analysis_failed",
@@ -403,16 +363,7 @@ async def _analyse_and_trade_symbol(
         )
         return
 
-    # Gate: don't mix BUY and SELL in the basket
-    all_open = await trade_crud.get_open_trades(db, session.user_id)
-    if all_open:
-        basket_dir = _get_basket_direction(all_open)
-        if basket_dir and basket_dir != signal.signal:
-            logger.info("strategy.opposite_direction_blocked",
-                        basket=basket_dir, signal=signal.signal, symbol=symbol)
-            return
-
-    # ── Place trade ───────────────────────────────────────────────────────────
+    # ── Place trade ────────────────────────────────────────────────────────
     contract_type = "CALL" if signal.signal == "BUY" else "PUT"
     stake = risk.default_stake
 
@@ -446,9 +397,9 @@ async def _analyse_and_trade_symbol(
 
         await _send_notif(
             session, db, "trade_open",
-            f"Auto Trade Opened — {signal.signal}",
-            f"{contract_type} on {symbol} | Stake: ${stake} | "
-            f"Confidence: {int(signal.confidence * 100)}%",
+            f"1M {signal.signal} — {symbol}",
+            f"{contract_type} | Stake: ${stake} | EMA3: {signal.ema3_value:.5f} | "
+            f"RSI: {signal.rsi_value:.1f}% | Conf: {int(signal.confidence * 100)}%",
         )
 
         logger.info(
@@ -464,53 +415,6 @@ async def _analyse_and_trade_symbol(
     except Exception as e:
         logger.error("strategy.trade_failed",
                      user_id=session.user_id, symbol=symbol, error=str(e))
-
-
-async def _get_basket_profit(session: UserSession, open_trades: List[Trade]) -> float:
-    """Get total floating profit of all open basket trades from Deriv."""
-    total = 0.0
-    for trade in open_trades:
-        if not trade.contract_id:
-            continue
-        try:
-            details = await session.client.get_contract_details(int(trade.contract_id))
-            total += float(details.get("profit", 0))
-        except Exception:
-            pass
-    return total
-
-
-def _get_basket_direction(open_trades: List[Trade]) -> Optional[str]:
-    """Returns 'BUY', 'SELL', or None if basket is empty."""
-    for trade in open_trades:
-        if trade.contract_type == "CALL":
-            return "BUY"
-        if trade.contract_type == "PUT":
-            return "SELL"
-    return None
-
-
-async def _close_all_basket(
-    session: UserSession, open_trades: List[Trade], db: AsyncSession
-) -> None:
-    """Close all open basket trades on Deriv and update DB."""
-    for trade in open_trades:
-        if not trade.contract_id:
-            continue
-        try:
-            sell_info = await session.client.sell_contract(int(trade.contract_id))
-            sold_for = float(sell_info.get("sold_for", 0))
-            profit = sold_for - trade.stake
-            await trade_crud.close_trade(
-                db,
-                trade=trade,
-                exit_price=float(sell_info.get("exit_spot", 0)),
-                profit=profit,
-                payout=sold_for,
-            )
-        except Exception as e:
-            logger.warning("strategy.close_failed", trade_id=trade.id, error=str(e))
-    await db.commit()
 
 
 async def _send_notif(
@@ -530,9 +434,9 @@ async def _send_notif(
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 # Trade status monitor (every 5 seconds)
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 
 async def _monitor_loop(session: UserSession) -> None:
     """Syncs open trade statuses with Deriv every 5 seconds."""
@@ -553,70 +457,71 @@ async def _monitor_loop(session: UserSession) -> None:
 async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
     """
     Check each open trade:
-    1. MA cross exit — if enabled and MAs cross against position → sell early
+    1. Trailing stop — if enabled and price moves against position by trailing_stop_distance
     2. Trade status sync — if contract expired on Deriv → close in DB
     """
-    from app.services.ai_engine import AIEngine
     from app.crud.strategy import get_strategy_settings
 
     open_trades = await trade_crud.get_open_trades(db, session.user_id)
     if not open_trades:
         return
 
-    # Load strategy settings to check if MA cross exit is enabled
     strat = await get_strategy_settings(db, session.user_id)
-    ma_exit_enabled = getattr(strat, "ma_cross_exit_enabled", False)
 
     for trade in open_trades:
         if not trade.contract_id:
             continue
 
-        # ── Priority 1: MA Cross Exit ──────────────────────────────────────
-        if ma_exit_enabled and session.client:
+        # ── Priority 1: Trailing Stop ──────────────────────────────────────
+        if strat.trailing_stop_enabled and session.client:
             try:
-                engine = AIEngine(client=session.client, settings=strat)
-                position_type = "BUY" if trade.contract_type == "CALL" else "SELL"
-                should_exit, exit_reason = await engine.check_ma_cross_exit(
-                    trade.symbol, position_type
-                )
-                if should_exit:
-                    logger.info(
-                        "monitor.ma_cross_exit",
-                        trade_id=trade.id,
-                        reason=exit_reason,
-                    )
-                    try:
-                        sell_info = await session.client.sell_contract(
-                            int(trade.contract_id)
-                        )
-                        sold_for = float(sell_info.get("sold_for", 0))
-                        profit = sold_for - trade.stake
-                        await trade_crud.close_trade(
-                            db,
-                            trade=trade,
-                            exit_price=float(sell_info.get("exit_spot", 0)),
-                            profit=profit,
-                            payout=sold_for,
-                        )
-                        await _notify_trade_close_by_id(
-                            session.user_id, session.fcm_token, trade, db
-                        )
-                        await _send_notif(
-                            session, db, "ma_cross_exit",
-                            "MA Cross Exit",
-                            f"{trade.contract_type} on {trade.symbol} closed — {exit_reason}",
-                        )
-                        await db.commit()
-                        continue  # trade closed — skip status check
-                    except Exception as e:
-                        logger.warning(
-                            "monitor.ma_cross_sell_failed",
-                            trade_id=trade.id,
-                            error=str(e),
-                        )
+                details = await session.client.get_contract_details(int(trade.contract_id))
+                bid_price = float(details.get("bid_price", 0))
+
+                if bid_price > 0 and trade.payout and trade.stake:
+                    current_profit = bid_price - trade.stake
+                    trailing_stop_dist = strat.trailing_stop_distance
+
+                    # If trade is winning and hits trailing stop
+                    if current_profit > 0:
+                        if current_profit <= trailing_stop_dist:
+                            logger.info(
+                                "monitor.trailing_stop_hit",
+                                trade_id=trade.id,
+                                profit=current_profit,
+                            )
+                            try:
+                                sell_info = await session.client.sell_contract(
+                                    int(trade.contract_id)
+                                )
+                                sold_for = float(sell_info.get("sold_for", 0))
+                                profit = sold_for - trade.stake
+                                await trade_crud.close_trade(
+                                    db,
+                                    trade=trade,
+                                    exit_price=float(sell_info.get("exit_spot", 0)),
+                                    profit=profit,
+                                    payout=sold_for,
+                                )
+                                await _notify_trade_close_by_id(
+                                    session.user_id, session.fcm_token, trade, db
+                                )
+                                await _send_notif(
+                                    session, db, "trailing_stop",
+                                    "Trailing Stop Hit",
+                                    f"{trade.contract_type} on {trade.symbol} closed | Profit: ${profit:.2f}",
+                                )
+                                await db.commit()
+                                continue
+                            except Exception as e:
+                                logger.warning(
+                                    "monitor.trailing_stop_sell_failed",
+                                    trade_id=trade.id,
+                                    error=str(e),
+                                )
             except Exception as e:
                 logger.warning(
-                    "monitor.ma_cross_check_failed",
+                    "monitor.trailing_stop_check_failed",
                     trade_id=trade.id,
                     error=str(e),
                 )
@@ -659,9 +564,9 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
             )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 # Manual trade execution (from API)
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 
 async def execute_trade(
     user: User,
@@ -778,9 +683,9 @@ async def close_trade_manually(
     return updated
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 # Notification helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 
 async def _notify_trade_close_by_id(
     user_id: int, fcm_token: Optional[str], trade: Trade, db: AsyncSession
