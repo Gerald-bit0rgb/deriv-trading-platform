@@ -1,5 +1,6 @@
 """
 Trade model — records every trade executed through the platform.
+Updated for lot-based trading (EA-style, not duration-based).
 """
 from __future__ import annotations
 
@@ -28,27 +29,30 @@ class Trade(Base):
     )
     symbol: Mapped[str] = mapped_column(String(50), nullable=False)
     contract_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    duration: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    duration_unit: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
 
-    stake: Mapped[float] = mapped_column(Float, nullable=False)
+    # ── Lot-based trading (not duration, not stake) ────────────────────────────
+    lot_size: Mapped[float] = mapped_column(Float, nullable=False, description="Lot size e.g. 0.01, 0.1, 1.0")
+    
+    # Entry/Exit prices and profit (in account currency)
     payout: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     entry_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    take_profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    stop_loss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # ── Trade status and result ───────────────────────────────────────────────
     status: Mapped[str] = mapped_column(String(20), default="open", index=True)
     is_win: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
 
+    # ── AI signal info ────────────────────────────────────────────────────────
     ai_signal: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     ai_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     ai_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ── Trade source (auto or manual) ─────────────────────────────────────────
     source: Mapped[str] = mapped_column(String(20), default="manual")
 
+    # ── Timestamps ────────────────────────────────────────────────────────────
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -61,4 +65,4 @@ class Trade(Base):
     user: Mapped["User"] = relationship(back_populates="trades")
 
     def __repr__(self) -> str:
-        return f"<Trade id={self.id} symbol={self.symbol!r} status={self.status!r}>"
+        return f"<Trade id={self.id} symbol={self.symbol!r} status={self.status!r} lots={self.lot_size}>"
