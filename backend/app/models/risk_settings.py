@@ -1,5 +1,6 @@
 """
 RiskSettings model — one row per user, stores all risk management parameters.
+Updated for lot-based trading (like MT5 EAs), not duration-based.
 """
 from __future__ import annotations
 
@@ -23,25 +24,30 @@ class RiskSettings(Base):
         Integer, ForeignKey("users.id"), unique=True, nullable=False
     )
 
-    default_stake: Mapped[float] = mapped_column(Float, default=1.0)
-    max_stake: Mapped[float] = mapped_column(Float, default=10.0)
+    # ── Lot-based trading (not USD stake) ──────────────────────────────────
+    # default_lot_size: e.g., 0.01, 0.1, 1.0 lots
+    default_lot_size: Mapped[float] = mapped_column(Float, default=0.01)
+    max_lot_size: Mapped[float] = mapped_column(Float, default=1.0)
 
+    # ── Daily loss limit (in USD or account currency) ─────────────────────
     max_daily_loss: Mapped[float] = mapped_column(Float, default=50.0)
-    max_daily_trades: Mapped[int] = mapped_column(Integer, default=20)
-    daily_profit_target: Mapped[float] = mapped_column(Float, default=100.0)
+    max_daily_trades: Mapped[int] = mapped_column(Integer, default=100)  # unlimited for EA-style
+    daily_profit_target: Mapped[float] = mapped_column(Float, default=200.0)
 
-    max_open_trades: Mapped[int] = mapped_column(Integer, default=3)
-
-    take_profit_pct: Mapped[float] = mapped_column(Float, default=0.85)
-    stop_loss_pct: Mapped[float] = mapped_column(Float, default=1.0)
-    trailing_stop_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    trailing_stop_pct: Mapped[float] = mapped_column(Float, default=0.1)
-
+    # ── Risk limits (removed max_open_trades — now trade all symbols) ────
+    # max_open_trades removed — bot trades all watchlist symbols
     max_drawdown_pct: Mapped[float] = mapped_column(Float, default=20.0)
 
+    # ── Exit signals (no duration, exit on crossback) ──────────────────────
+    # Trades exit when EMA crosses back through BB middle (not on duration)
+    trailing_stop_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    trailing_stop_distance: Mapped[float] = mapped_column(Float, default=2.0)  # pips
+
+    # ── Emergency controls ─────────────────────────────────────────────────
     emergency_stop: Mapped[bool] = mapped_column(Boolean, default=False)
     trading_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # ── AI confidence threshold ────────────────────────────────────────────
     min_ai_confidence: Mapped[float] = mapped_column(Float, default=0.65)
 
     updated_at: Mapped[datetime] = mapped_column(
