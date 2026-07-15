@@ -142,9 +142,7 @@ async def place_trade(
             user=current_user,
             symbol=data.symbol,
             contract_type=data.contract_type,
-            stake=data.stake,
-            duration=data.duration,
-            duration_unit=data.duration_unit,
+            lot_size=data.lot_size,
             db=db,
             source="manual",
         )

@@ -1,23 +1,27 @@
 """
-Trading Engine — 1-Minute Microtrading Strategy
+Trading Engine — 1-Minute Microtrading Strategy (EA-style, Multiplier contracts)
 
 Automated bot loop:
   Every new 1M bar:
     1. Run 1M microtrading analysis on all watchlist symbols
-    2. If BUY/SELL signal with high confidence → place trade
-    3. Check open trades for trailing stop hits or early exits
+    2. If BUY/SELL signal with high confidence → open a MULTUP/MULTDOWN position
+    3. Check open trades for crossback exit, trailing stop hits, or status sync
   Every 5 seconds:
-    4. Sync open trade statuses with Deriv
-    5. Monitor trailing stops
+    4. Check crossback exit signal (EMA crosses back through BB middle)
+    5. Check trailing stop
+    6. Sync any trades closed on Deriv's side (e.g. stop-out)
 
 Settings (read from user's RiskSettings):
-  default_stake       → lot size per entry
-  max_open_trades     → max concurrent positions
+  default_lot_size    → lot size per entry
+  max_lot_size        → per-trade lot cap
   daily_profit_target → daily stop (optional)
+
+No fixed-duration exits — positions stay open until a crossback or trailing
+stop closes them, same as an MT5 Expert Advisor.
 """
 import asyncio
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +38,9 @@ logger = get_logger(__name__)
 
 # Default trading symbol for the automated bot
 DEFAULT_SYMBOL = "R_100"   # Volatility 100 Index — 24/7 synthetic
+
+# Leverage used for Multiplier (MULTUP/MULTDOWN) contracts — EA-style positions
+DEFAULT_MULTIPLIER = 100
 
 
 class BotStatus(str, Enum):
@@ -226,7 +233,6 @@ async def _run_microtrading_loop(session: UserSession, db: AsyncSession) -> None
       3. Scan every watchlist symbol and trade qualifying signals
       4. Check open trades for exits (trailing stop or manual close)
     """
-    from app.services.ai_engine import AIEngine
     from app.crud.strategy import get_strategy_settings as get_strat
     from app.crud.watchlist import get_watchlist_symbols
 
@@ -284,13 +290,6 @@ async def _run_microtrading_loop(session: UserSession, db: AsyncSession) -> None
 
     # ── Scan every watchlist symbol and trade qualifying signals ─────────
     for symbol in symbols:
-        # Refresh open-trade count after each placement
-        current_open = await trade_crud.get_open_trades(db, session.user_id)
-        if len(current_open) >= risk.max_open_trades:
-            logger.info("strategy.max_trades_reached",
-                        count=len(current_open), user_id=session.user_id)
-            break
-
         await _analyse_and_trade_symbol(
             session=session,
             db=db,
@@ -363,17 +362,16 @@ async def _analyse_and_trade_symbol(
         )
         return
 
-    # ── Place trade ────────────────────────────────────────────────────────
-    contract_type = "CALL" if signal.signal == "BUY" else "PUT"
-    stake = risk.default_stake
+    # ── Place trade (EA-style: Multiplier contract, no duration) ────────────
+    contract_type = "MULTUP" if signal.signal == "BUY" else "MULTDOWN"
+    lot_size = min(risk.default_lot_size, risk.max_lot_size)
 
     try:
         contract = await session.client.buy_contract(
             symbol=symbol,
             contract_type=contract_type,
-            stake=stake,
-            duration=strat.trade_duration,
-            duration_unit=strat.trade_duration_unit,
+            amount=lot_size,
+            multiplier=DEFAULT_MULTIPLIER,
         )
 
         trade = await trade_crud.create_trade(
@@ -382,9 +380,7 @@ async def _analyse_and_trade_symbol(
             contract_id=str(contract.get("contract_id")),
             symbol=symbol,
             contract_type=contract_type,
-            duration=strat.trade_duration,
-            duration_unit=strat.trade_duration_unit,
-            stake=stake,
+            lot_size=lot_size,
             entry_price=contract.get("entry_spot"),
             payout=contract.get("payout"),
             ai_signal=signal.signal,
@@ -398,7 +394,7 @@ async def _analyse_and_trade_symbol(
         await _send_notif(
             session, db, "trade_open",
             f"1M {signal.signal} — {symbol}",
-            f"{contract_type} | Stake: ${stake} | EMA3: {signal.ema3_value:.5f} | "
+            f"{contract_type} | Lots: {lot_size} | EMA3: {signal.ema3_value:.5f} | "
             f"RSI: {signal.rsi_value:.1f}% | Conf: {int(signal.confidence * 100)}%",
         )
 
@@ -409,7 +405,7 @@ async def _analyse_and_trade_symbol(
             symbol=symbol,
             signal=signal.signal,
             confidence=signal.confidence,
-            stake=stake,
+            lot_size=lot_size,
         )
 
     except Exception as e:
@@ -456,11 +452,13 @@ async def _monitor_loop(session: UserSession) -> None:
 
 async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
     """
-    Check each open trade:
-    1. Trailing stop — if enabled and price moves against position by trailing_stop_distance
-    2. Trade status sync — if contract expired on Deriv → close in DB
+    Check each open trade, in priority order:
+    1. Crossback exit — the strategy's real exit rule (EMA crosses back through BB middle)
+    2. Trailing stop — if enabled, protects profit once a trade is winning
+    3. Status sync — catches contracts closed on Deriv's side (e.g. stop-out)
     """
     from app.crud.strategy import get_strategy_settings
+    from app.services.ai_engine import AIEngine
 
     open_trades = await trade_crud.get_open_trades(db, session.user_id)
     if not open_trades:
@@ -472,53 +470,92 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
         if not trade.contract_id:
             continue
 
-        # ── Priority 1: Trailing Stop ──────────────────────────────────────
+        # ── Priority 1: Crossback exit (the strategy's real exit signal) ──
+        if strat.exit_on_crossback_enabled and session.client:
+            try:
+                trade_direction = "BUY" if trade.contract_type == "MULTUP" else "SELL"
+                engine = AIEngine(client=session.client, settings=strat)
+                should_exit = await engine.check_exit_signal(
+                    trade.symbol, trade_direction, granularity=60
+                )
+                if should_exit:
+                    try:
+                        sell_info = await session.client.sell_contract(int(trade.contract_id))
+                        sold_for = float(sell_info.get("sold_for", 0))
+                        profit = float(sell_info.get("profit", sold_for))
+                        await trade_crud.close_trade(
+                            db,
+                            trade=trade,
+                            exit_price=float(sell_info.get("exit_spot", 0)),
+                            profit=profit,
+                            payout=sold_for,
+                        )
+                        await _notify_trade_close_by_id(
+                            session.user_id, session.fcm_token, trade, db
+                        )
+                        await _send_notif(
+                            session, db, "crossback_exit",
+                            "Crossback Exit",
+                            f"{trade.contract_type} on {trade.symbol} closed | Profit: ${profit:.2f}",
+                        )
+                        await db.commit()
+                        continue
+                    except Exception as e:
+                        logger.warning(
+                            "monitor.crossback_sell_failed",
+                            trade_id=trade.id,
+                            error=str(e),
+                        )
+            except Exception as e:
+                logger.warning(
+                    "monitor.crossback_check_failed",
+                    trade_id=trade.id,
+                    error=str(e),
+                )
+
+        # ── Priority 2: Trailing Stop ──────────────────────────────────────
         if strat.trailing_stop_enabled and session.client:
             try:
                 details = await session.client.get_contract_details(int(trade.contract_id))
-                bid_price = float(details.get("bid_price", 0))
+                current_profit = float(details.get("profit", 0))
+                trailing_stop_dist = strat.trailing_stop_distance
 
-                if bid_price > 0 and trade.payout and trade.stake:
-                    current_profit = bid_price - trade.stake
-                    trailing_stop_dist = strat.trailing_stop_distance
-
-                    # If trade is winning and hits trailing stop
-                    if current_profit > 0:
-                        if current_profit <= trailing_stop_dist:
-                            logger.info(
-                                "monitor.trailing_stop_hit",
-                                trade_id=trade.id,
-                                profit=current_profit,
-                            )
-                            try:
-                                sell_info = await session.client.sell_contract(
-                                    int(trade.contract_id)
-                                )
-                                sold_for = float(sell_info.get("sold_for", 0))
-                                profit = sold_for - trade.stake
-                                await trade_crud.close_trade(
-                                    db,
-                                    trade=trade,
-                                    exit_price=float(sell_info.get("exit_spot", 0)),
-                                    profit=profit,
-                                    payout=sold_for,
-                                )
-                                await _notify_trade_close_by_id(
-                                    session.user_id, session.fcm_token, trade, db
-                                )
-                                await _send_notif(
-                                    session, db, "trailing_stop",
-                                    "Trailing Stop Hit",
-                                    f"{trade.contract_type} on {trade.symbol} closed | Profit: ${profit:.2f}",
-                                )
-                                await db.commit()
-                                continue
-                            except Exception as e:
-                                logger.warning(
-                                    "monitor.trailing_stop_sell_failed",
-                                    trade_id=trade.id,
-                                    error=str(e),
-                                )
+                # If trade is winning and hits trailing stop
+                if current_profit > 0 and current_profit <= trailing_stop_dist:
+                    logger.info(
+                        "monitor.trailing_stop_hit",
+                        trade_id=trade.id,
+                        profit=current_profit,
+                    )
+                    try:
+                        sell_info = await session.client.sell_contract(
+                            int(trade.contract_id)
+                        )
+                        sold_for = float(sell_info.get("sold_for", 0))
+                        profit = float(sell_info.get("profit", sold_for))
+                        await trade_crud.close_trade(
+                            db,
+                            trade=trade,
+                            exit_price=float(sell_info.get("exit_spot", 0)),
+                            profit=profit,
+                            payout=sold_for,
+                        )
+                        await _notify_trade_close_by_id(
+                            session.user_id, session.fcm_token, trade, db
+                        )
+                        await _send_notif(
+                            session, db, "trailing_stop",
+                            "Trailing Stop Hit",
+                            f"{trade.contract_type} on {trade.symbol} closed | Profit: ${profit:.2f}",
+                        )
+                        await db.commit()
+                        continue
+                    except Exception as e:
+                        logger.warning(
+                            "monitor.trailing_stop_sell_failed",
+                            trade_id=trade.id,
+                            error=str(e),
+                        )
             except Exception as e:
                 logger.warning(
                     "monitor.trailing_stop_check_failed",
@@ -526,14 +563,15 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                     error=str(e),
                 )
 
-        # ── Priority 2: Contract status sync (duration expired) ───────────
+        # ── Priority 3: Status sync — catches contracts closed on Deriv's
+        # side outside our control (e.g. stop-out from insufficient margin) ──
         try:
             details = await session.client.get_contract_details(
                 int(trade.contract_id)
             )
             status = details.get("status")
 
-            if status in ("won", "lost", "sold"):
+            if status in ("sold", "stopped_out"):
                 profit = float(details.get("profit", 0))
                 payout = float(
                     details.get("sell_price") or details.get("bid_price") or 0
@@ -572,32 +610,32 @@ async def execute_trade(
     user: User,
     symbol: str,
     contract_type: str,
-    stake: float,
-    duration: int,
-    duration_unit: str,
+    lot_size: float,
     db: AsyncSession,
     ai_signal: Optional[str] = None,
     ai_confidence: Optional[float] = None,
     ai_reason: Optional[str] = None,
     source: str = "manual",
 ) -> Trade:
-    """Validate risk rules, place a contract on Deriv, and record it."""
+    """
+    Validate risk rules, open an EA-style Multiplier position on Deriv, and record it.
+
+    contract_type: "MULTUP" (buy/long) or "MULTDOWN" (sell/short)
+    """
     risk = await get_or_create_risk_settings(db, user.id)
 
     if risk.emergency_stop:
         raise RuntimeError("Emergency stop is active — trading halted")
     if not risk.trading_enabled:
         raise RuntimeError("Trading is disabled in risk settings")
-    if stake > risk.max_stake:
-        raise RuntimeError(f"Stake {stake} exceeds max allowed {risk.max_stake}")
-
-    open_trades = await trade_crud.get_open_trades(db, user.id)
-    if len(open_trades) >= risk.max_open_trades:
-        raise RuntimeError(f"Max open trades ({risk.max_open_trades}) already reached")
+    if lot_size > risk.max_lot_size:
+        raise RuntimeError(f"Lot size {lot_size} exceeds max allowed {risk.max_lot_size}")
 
     summary = await trade_crud.get_daily_summary(db, user.id)
     if summary["today_profit"] <= -abs(risk.max_daily_loss):
         raise RuntimeError("Daily loss limit reached — trading stopped for today")
+    if summary["today_trades"] >= risk.max_daily_trades:
+        raise RuntimeError(f"Daily trade limit ({risk.max_daily_trades}) already reached")
     if ai_confidence is not None and ai_confidence < risk.min_ai_confidence:
         raise RuntimeError(
             f"AI confidence {ai_confidence:.2f} below minimum {risk.min_ai_confidence}"
@@ -610,9 +648,8 @@ async def execute_trade(
     contract = await session.client.buy_contract(
         symbol=symbol,
         contract_type=contract_type,
-        stake=stake,
-        duration=duration,
-        duration_unit=duration_unit,
+        amount=lot_size,
+        multiplier=DEFAULT_MULTIPLIER,
     )
 
     trade = await trade_crud.create_trade(
@@ -621,9 +658,7 @@ async def execute_trade(
         contract_id=str(contract.get("contract_id")),
         symbol=symbol,
         contract_type=contract_type,
-        duration=duration,
-        duration_unit=duration_unit,
-        stake=stake,
+        lot_size=lot_size,
         entry_price=contract.get("entry_spot"),
         payout=contract.get("payout"),
         ai_signal=ai_signal,
@@ -638,14 +673,14 @@ async def execute_trade(
         user_id=user.id,
         type_="trade_open",
         title="Trade Opened",
-        body=f"{contract_type} on {symbol} | Stake: {stake}",
+        body=f"{contract_type} on {symbol} | Lots: {lot_size}",
     )
     if user.fcm_token:
         asyncio.create_task(
             send_push_notification(
                 token=user.fcm_token,
                 title="Trade Opened",
-                body=f"{contract_type} on {symbol} | Stake: {stake}",
+                body=f"{contract_type} on {symbol} | Lots: {lot_size}",
             )
         )
 
@@ -655,7 +690,7 @@ async def execute_trade(
         trade_id=trade.id,
         symbol=symbol,
         contract_type=contract_type,
-        stake=stake,
+        lot_size=lot_size,
     )
     return trade
 
@@ -663,14 +698,14 @@ async def execute_trade(
 async def close_trade_manually(
     trade: Trade, user: User, db: AsyncSession
 ) -> Trade:
-    """Manually close an open trade before expiry."""
+    """Manually close an open EA-style position."""
     session = _sessions.get(user.id)
     if session is None or session.client is None:
         raise RuntimeError("Trading session not active")
 
     sell_info = await session.client.sell_contract(int(trade.contract_id))
     sold_for = float(sell_info.get("sold_for", 0))
-    profit = sold_for - trade.stake
+    profit = float(sell_info.get("profit", sold_for))
 
     updated = await trade_crud.close_trade(
         db,

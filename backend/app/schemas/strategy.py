@@ -6,6 +6,15 @@ from pydantic import BaseModel, Field
 
 
 class StrategySettingsUpdate(BaseModel):
+    # ── Trend Direction Filter (e.g. 4H EMA 5/13) ───────────────────────────────
+    # Gates entries: only BUY when trend is bullish, only SELL when bearish.
+    require_trend_alignment: bool = Field(default=True, description="Require 4H trend to align with 1M entry")
+    trend_timeframe: int = Field(default=14400, description="Trend timeframe in seconds — 14400 = 4H")
+    trend_fast_period: int = Field(default=5, ge=1, le=200)
+    trend_slow_period: int = Field(default=13, ge=1, le=200)
+    trend_ma_method: str = Field(default="EMA", description="EMA, SMA, WMA, or SMMA")
+    trend_applied_price: str = Field(default="CLOSE")
+
     # ── 1M Entry Timeframe (hardcoded) ────────────────────────────────────────
     entry_timeframe: int = Field(default=60, description="Always 1 minute (60 seconds)")
 

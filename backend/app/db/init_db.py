@@ -40,6 +40,31 @@ async def init_db() -> None:
             ALTER TABLE strategy_settings
             ADD COLUMN IF NOT EXISTS ma_cross_exit_enabled BOOLEAN DEFAULT FALSE
             """,
+            # ── Trend direction filter (4H EMA5/13 gate) ─────────────────────────
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS require_trend_alignment BOOLEAN DEFAULT TRUE
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS trend_timeframe INTEGER DEFAULT 14400
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS trend_fast_period INTEGER DEFAULT 5
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS trend_slow_period INTEGER DEFAULT 13
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS trend_ma_method VARCHAR(10) DEFAULT 'EMA'
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS trend_applied_price VARCHAR(10) DEFAULT 'CLOSE'
+            """,
         ]
         for sql in migrations:
             try:

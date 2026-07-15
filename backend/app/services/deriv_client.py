@@ -301,23 +301,31 @@ class DerivClient:
         self,
         symbol: str,
         contract_type: str,
-        stake: float,
-        duration: int,
-        duration_unit: str = "t",
+        amount: float,
+        multiplier: int = 100,
     ) -> dict:
-        # Get proposal
+        """
+        Open an EA-style position using Deriv Multiplier contracts.
+
+        contract_type: "MULTUP" (buy/long) or "MULTDOWN" (sell/short)
+        amount:        stake in account currency (basis for the multiplier)
+        multiplier:    leverage, e.g. 100 for 100x
+
+        Unlike binary options (CALL/PUT), Multiplier contracts have no fixed
+        duration — they stay open until explicitly sold via sell_contract(),
+        which is what makes real entries/exits possible.
+        """
         proposal = await self._send({
             "proposal": 1,
-            "amount": stake,
+            "amount": amount,
             "basis": "stake",
             "contract_type": contract_type,
             "currency": "USD",
-            "duration": duration,
-            "duration_unit": duration_unit,
+            "multiplier": multiplier,
             "underlying_symbol": symbol,
         })
         proposal_id = proposal.get("proposal", {}).get("id")
-        ask_price = proposal.get("proposal", {}).get("ask_price", stake)
+        ask_price = proposal.get("proposal", {}).get("ask_price", amount)
 
         if not proposal_id:
             raise RuntimeError(f"Failed to get proposal: {proposal}")
@@ -326,11 +334,12 @@ class DerivClient:
         buy_response = await self._send({"buy": proposal_id, "price": ask_price})
         contract = buy_response.get("buy", {})
         logger.info(
-            "deriv.trade_placed",
+            "deriv.position_opened",
             contract_id=contract.get("contract_id"),
             symbol=symbol,
             contract_type=contract_type,
-            stake=stake,
+            amount=amount,
+            multiplier=multiplier,
         )
         return contract
 

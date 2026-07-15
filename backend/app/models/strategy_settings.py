@@ -25,7 +25,17 @@ class StrategySettings(Base):
         Integer, ForeignKey("users.id"), unique=True, nullable=False
     )
 
-    # ── 1M Microtrading Strategy ───────────────────────────────────────────────
+    # ── Trend Direction Filter (e.g. 4H EMA 5/13) ───────────────────────────────
+    # Gates entries: only take BUY when trend is bullish, SELL when bearish.
+    # Separate from the 1M entry-confirmation indicators below.
+    require_trend_alignment: Mapped[bool] = mapped_column(Boolean, default=True)
+    trend_timeframe: Mapped[int] = mapped_column(Integer, default=14400)  # 4H
+    trend_fast_period: Mapped[int] = mapped_column(Integer, default=5)
+    trend_slow_period: Mapped[int] = mapped_column(Integer, default=13)
+    trend_ma_method: Mapped[str] = mapped_column(String(10), default="EMA")
+    trend_applied_price: Mapped[str] = mapped_column(String(10), default="CLOSE")
+
+    # ── 1M Entry Confirmation ───────────────────────────────────────────────────
     # Entry timeframe: 60=1M (hardcoded)
     entry_timeframe: Mapped[int] = mapped_column(Integer, default=60)
 

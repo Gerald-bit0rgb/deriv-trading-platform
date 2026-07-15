@@ -9,12 +9,8 @@ from pydantic import BaseModel, Field
 
 class TradeCreate(BaseModel):
     symbol: str = Field(examples=["R_100", "frxEURUSD"])
-    contract_type: str = Field(examples=["CALL", "PUT"])
-    stake: float = Field(gt=0)
-    duration: int = Field(gt=0)
-    duration_unit: str = Field(examples=["t", "s", "m"])
-    take_profit: Optional[float] = None
-    stop_loss: Optional[float] = None
+    contract_type: str = Field(examples=["MULTUP", "MULTDOWN"])
+    lot_size: float = Field(gt=0, examples=[0.01, 0.1, 1.0])
 
 
 class TradeResponse(BaseModel):
@@ -22,13 +18,11 @@ class TradeResponse(BaseModel):
     contract_id: Optional[str]
     symbol: str
     contract_type: str
-    stake: float
+    lot_size: float
     payout: Optional[float]
     profit: Optional[float]
     entry_price: Optional[float]
     exit_price: Optional[float]
-    take_profit: Optional[float]
-    stop_loss: Optional[float]
     status: str
     is_win: Optional[bool]
     ai_signal: Optional[str]

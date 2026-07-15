@@ -79,11 +79,12 @@ async def get_signal(
         signal=signal.signal,
         confidence=signal.confidence,
         reason=signal.reason,
-        trend=signal.trend,
+        ema3_value=signal.ema3_value,
+        bb_middle=signal.bb_middle,
+        macd_histogram=signal.macd_histogram,
+        rsi_value=signal.rsi_value,
         volatility=signal.volatility,
-        pattern=signal.pattern,
-        entry_price=signal.entry_price,
-        suggested_stake=signal.suggested_stake,
+        trend_direction=signal.trend_direction,
         generated_at=signal.generated_at,
     )
 
@@ -110,11 +111,12 @@ async def get_batch_signals(
             signal=sig.signal,
             confidence=sig.confidence,
             reason=sig.reason,
-            trend=sig.trend,
+            ema3_value=sig.ema3_value,
+            bb_middle=sig.bb_middle,
+            macd_histogram=sig.macd_histogram,
+            rsi_value=sig.rsi_value,
             volatility=sig.volatility,
-            pattern=sig.pattern,
-            entry_price=sig.entry_price,
-            suggested_stake=sig.suggested_stake,
+            trend_direction=sig.trend_direction,
             generated_at=sig.generated_at,
         )
         for sig in results.values()
@@ -124,9 +126,7 @@ async def get_batch_signals(
 @router.post("/auto-trade/{symbol}", status_code=status.HTTP_201_CREATED)
 async def ai_auto_trade(
     symbol: str,
-    stake: float = Query(1.0, gt=0, description="Stake amount"),
-    duration: int = Query(5, gt=0),
-    duration_unit: str = Query("t", description="t=ticks, s=seconds, m=minutes"),
+    lot_size: float = Query(0.01, gt=0, description="Lot size, e.g. 0.01, 0.1, 1.0"),
     granularity: int = Query(60),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -172,16 +172,14 @@ async def ai_auto_trade(
             "message": "AI decided to WAIT — no trade placed",
         }
 
-    contract_type = "CALL" if signal.signal == "BUY" else "PUT"
+    contract_type = "MULTUP" if signal.signal == "BUY" else "MULTDOWN"
 
     try:
         trade = await trading_engine.execute_trade(
             user=current_user,
             symbol=symbol,
             contract_type=contract_type,
-            stake=stake,
-            duration=duration,
-            duration_unit=duration_unit,
+            lot_size=lot_size,
             db=db,
             ai_signal=signal.signal,
             ai_confidence=signal.confidence,

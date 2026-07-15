@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.crud.risk import get_or_create_risk_settings
-from app.crud.trade import get_daily_summary, get_open_trades
+from app.crud.trade import get_daily_summary
 from app.models.risk_settings import RiskSettings
 
 logger = get_logger(__name__)
@@ -21,13 +21,13 @@ logger = get_logger(__name__)
 class RiskCheckResult:
     allowed: bool
     reason: str
-    adjusted_stake: Optional[float] = None   # engine may reduce stake
+    adjusted_lot_size: Optional[float] = None   # engine may reduce lot size
 
 
 async def check_trade_allowed(
     db: AsyncSession,
     user_id: int,
-    requested_stake: float,
+    requested_lot_size: float,
     symbol: str,
     current_balance: float,
 ) -> RiskCheckResult:
@@ -45,15 +45,15 @@ async def check_trade_allowed(
     if not settings.trading_enabled:
         return RiskCheckResult(False, "Trading is disabled in risk settings")
 
-    # ── Stake limits ──────────────────────────────────────────────────────────
-    stake = requested_stake
-    if stake > settings.max_stake:
-        logger.warning("risk.stake_exceeded", requested=stake, max=settings.max_stake)
-        # Automatically reduce stake to max instead of rejecting
-        stake = settings.max_stake
+    # ── Lot size limits ─────────────────────────────────────────────────────
+    lot_size = requested_lot_size
+    if lot_size > settings.max_lot_size:
+        logger.warning("risk.lot_size_exceeded", requested=lot_size, max=settings.max_lot_size)
+        # Automatically reduce lot size to max instead of rejecting
+        lot_size = settings.max_lot_size
 
-    if stake < settings.default_stake:
-        stake = settings.default_stake
+    if lot_size < settings.default_lot_size:
+        lot_size = settings.default_lot_size
 
     # ── Drawdown check ────────────────────────────────────────────────────────
     if current_balance > 0:
@@ -91,36 +91,28 @@ async def check_trade_allowed(
             f"Daily trade limit of {settings.max_daily_trades} reached",
         )
 
-    # ── Max open trades ───────────────────────────────────────────────────────
-    open_trades = await get_open_trades(db, user_id)
-    if len(open_trades) >= settings.max_open_trades:
-        return RiskCheckResult(
-            False,
-            f"Max concurrent open trades ({settings.max_open_trades}) reached",
-        )
-
     logger.info(
         "risk.check_passed",
         user_id=user_id,
         symbol=symbol,
-        stake=stake,
+        lot_size=lot_size,
     )
-    return RiskCheckResult(True, "All risk checks passed", adjusted_stake=stake)
+    return RiskCheckResult(True, "All risk checks passed", adjusted_lot_size=lot_size)
 
 
-def calculate_position_size(
+def calculate_lot_size(
     balance: float,
     risk_pct: float = 1.0,
-    min_stake: float = 0.35,
-    max_stake: float = 100.0,
+    min_lot: float = 0.01,
+    max_lot: float = 1.0,
 ) -> float:
     """
-    Kelly-inspired position sizing.
+    Kelly-inspired position sizing, in lots rather than a USD stake.
 
     Risk *risk_pct* percent of balance per trade, clamped between min and max.
     """
-    stake = balance * (risk_pct / 100)
-    return max(min_stake, min(stake, max_stake))
+    lot_size = balance * (risk_pct / 100) / 100  # rough $100-per-lot scaling
+    return max(min_lot, min(lot_size, max_lot))
 
 
 def trailing_stop_price(
@@ -132,10 +124,10 @@ def trailing_stop_price(
     """
     Calculate the current trailing-stop trigger price.
 
-    :param direction: "CALL" (price must stay above) or "PUT" (price must stay below)
+    :param direction: "BUY"/"MULTUP" (price must stay above) or "SELL"/"MULTDOWN" (price must stay below)
     :param trail_pct: how far below/above the peak the stop sits (as a fraction)
     """
-    if direction == "CALL":
+    if direction in ("BUY", "MULTUP"):
         # Stop rises with price; trails below the peak
         return current_price * (1 - trail_pct)
     else:

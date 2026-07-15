@@ -114,6 +114,7 @@ async def get_dashboard(
             "trading_enabled": risk.trading_enabled,
             "max_daily_loss": risk.max_daily_loss,
             "daily_profit_target": risk.daily_profit_target,
-            "max_open_trades": risk.max_open_trades,
+            "default_lot_size": risk.default_lot_size,
+            "max_lot_size": risk.max_lot_size,
         },
     }

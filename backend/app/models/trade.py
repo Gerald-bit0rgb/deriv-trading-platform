@@ -31,8 +31,9 @@ class Trade(Base):
     contract_type: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # ── Lot-based trading (not duration, not stake) ────────────────────────────
-    lot_size: Mapped[float] = mapped_column(Float, nullable=False, description="Lot size e.g. 0.01, 0.1, 1.0")
-    
+    # lot_size: e.g. 0.01, 0.1, 1.0 — same convention as MT5 EAs
+    lot_size: Mapped[float] = mapped_column(Float, nullable=False)
+
     # Entry/Exit prices and profit (in account currency)
     payout: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

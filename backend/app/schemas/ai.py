@@ -9,14 +9,15 @@ from pydantic import BaseModel
 
 class AISignalResponse(BaseModel):
     symbol: str
-    signal: str                    # BUY | SELL | WAIT
-    confidence: float              # 0.0 – 1.0
+    signal: str                        # BUY | SELL | WAIT
+    confidence: float                  # 0.0 – 1.0
     reason: str
-    trend: str                     # BULLISH | BEARISH | SIDEWAYS
-    volatility: str                # HIGH | MEDIUM | LOW
-    pattern: Optional[str]         # detected candlestick / technical pattern
-    entry_price: Optional[float]
-    suggested_stake: Optional[float]
+    ema3_value: Optional[float] = None
+    bb_middle: Optional[float] = None
+    macd_histogram: Optional[float] = None
+    rsi_value: Optional[float] = None
+    volatility: str = "MEDIUM"         # HIGH | MEDIUM | LOW
+    trend_direction: Optional[str] = None   # BULLISH | BEARISH | NEUTRAL
     generated_at: datetime
 
 

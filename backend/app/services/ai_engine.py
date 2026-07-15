@@ -3,7 +3,12 @@ AI Trading Signal Engine — 1-Minute Microtrading Strategy
 
 Strategy logic:
 
-  ENTRY signals:
+  TREND DIRECTION filter (configurable, e.g. 4H EMA 5 vs EMA 13):
+    Gates entries — BUY only allowed when the higher-timeframe trend is
+    BULLISH (fast MA above slow MA); SELL only allowed when BEARISH.
+    Can be disabled via require_trend_alignment=False.
+
+  ENTRY signals (1M, must also match the trend direction above):
     BUY signal — all 3 must be true simultaneously:
       1. EMA 3 crosses ABOVE BB middle band (18-period SMA)
       2. MACD Histogram value > 0
@@ -17,7 +22,7 @@ Strategy logic:
   EXIT signals (crossback):
     BUY trade closes when:
       - EMA 3 crosses BELOW BB middle band (bearish crossback)
-    
+
     SELL trade closes when:
       - EMA 3 crosses ABOVE BB middle band (bullish crossback)
 
@@ -51,6 +56,7 @@ class Signal:
     macd_histogram: Optional[float] = None
     rsi_value: Optional[float] = None
     volatility: str = "MEDIUM"
+    trend_direction: Optional[str] = None    # BULLISH | BEARISH | NEUTRAL | None
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -73,11 +79,65 @@ def _ema(prices: np.ndarray, period: int) -> np.ndarray:
 def _sma(prices: np.ndarray, period: int) -> np.ndarray:
     """Simple Moving Average."""
     if len(prices) < period:
-        return np.array([np.mean(prices[:i+1]) if i >= 0 else prices[0] for i in range(len(prices))])
+        return np.array([np.mean(prices[:i + 1]) if i >= 0 else prices[0] for i in range(len(prices))])
     result = np.full_like(prices, np.nan, dtype=float)
     for i in range(period - 1, len(prices)):
         result[i] = np.mean(prices[i - period + 1: i + 1])
     return result
+
+
+def _wma(prices: np.ndarray, period: int) -> np.ndarray:
+    """Linearly Weighted Moving Average — most recent bar weighted highest."""
+    weights = np.arange(1, period + 1, dtype=float)
+    result = np.full_like(prices, np.nan, dtype=float)
+    for i in range(period - 1, len(prices)):
+        window = prices[i - period + 1: i + 1]
+        result[i] = np.dot(window, weights) / weights.sum()
+    return result
+
+
+def _smma(prices: np.ndarray, period: int) -> np.ndarray:
+    """Smoothed Moving Average (Wilder's) — same style as RSI's smoothing."""
+    result = np.full_like(prices, np.nan, dtype=float)
+    if len(prices) < period:
+        return result
+    result[period - 1] = np.mean(prices[:period])
+    for i in range(period, len(prices)):
+        result[i] = (result[i - 1] * (period - 1) + prices[i]) / period
+    return result
+
+
+def _ma(prices: np.ndarray, period: int, method: str = "EMA") -> np.ndarray:
+    """Dispatch to the requested moving-average method (EMA, SMA, WMA, SMMA)."""
+    method = (method or "EMA").upper()
+    if method == "SMA":
+        return _sma(prices, period)
+    if method == "WMA":
+        return _wma(prices, period)
+    if method == "SMMA":
+        return _smma(prices, period)
+    return _ema(prices, period)
+
+
+def _apply_price(
+    opens: np.ndarray, highs: np.ndarray, lows: np.ndarray,
+    closes: np.ndarray, applied_price: str,
+) -> np.ndarray:
+    """Select the price series an indicator should be calculated on."""
+    p = (applied_price or "CLOSE").upper()
+    if p == "OPEN":
+        return opens
+    if p == "HIGH":
+        return highs
+    if p == "LOW":
+        return lows
+    if p == "MEDIAN":
+        return (highs + lows) / 2.0
+    if p == "TYPICAL":
+        return (highs + lows + closes) / 3.0
+    if p == "WEIGHTED":
+        return (highs + lows + closes + closes) / 4.0
+    return closes
 
 
 def _bb_bands(
@@ -129,7 +189,7 @@ def _rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
         return np.full_like(prices, 50.0)
 
     deltas = np.diff(prices)
-    seed = deltas[:period+1]
+    seed = deltas[:period + 1]
 
     up = seed[seed >= 0].sum() / period
     down = -seed[seed < 0].sum() / period
@@ -187,6 +247,51 @@ class AIEngine:
             return getattr(self._s, attr, default)
         return default
 
+    async def _get_trend_direction(self, symbol: str) -> Optional[str]:
+        """
+        Higher-timeframe trend filter (e.g. 4H EMA 5 vs EMA 13).
+
+        Returns "BULLISH" if the fast MA is above the slow MA, "BEARISH" if
+        below, or None if candles couldn't be fetched (caller should treat
+        that as "unknown" rather than blocking trades on a data hiccup).
+        """
+        timeframe = self._get("trend_timeframe", 14400)
+        fast_period = self._get("trend_fast_period", 5)
+        slow_period = self._get("trend_slow_period", 13)
+        method = self._get("trend_ma_method", "EMA")
+        applied_price = self._get("trend_applied_price", "CLOSE")
+
+        try:
+            candles = await self.client.get_candles(
+                symbol, granularity=timeframe, count=max(slow_period + 10, 60)
+            )
+        except Exception as e:
+            logger.warning("ai_engine.trend_fetch_failed", symbol=symbol, error=str(e))
+            return None
+
+        if len(candles) < slow_period + 2:
+            return None
+
+        opens = np.array([float(c["open"]) for c in candles])
+        highs = np.array([float(c["high"]) for c in candles])
+        lows = np.array([float(c["low"]) for c in candles])
+        closes = np.array([float(c["close"]) for c in candles])
+        prices = _apply_price(opens, highs, lows, closes, applied_price)
+
+        fast_ma = _ma(prices, fast_period, method)
+        slow_ma = _ma(prices, slow_period, method)
+
+        fast_now = fast_ma[-2]
+        slow_now = slow_ma[-2]
+        if np.isnan(fast_now) or np.isnan(slow_now):
+            return None
+
+        if fast_now > slow_now:
+            return "BULLISH"
+        if fast_now < slow_now:
+            return "BEARISH"
+        return "NEUTRAL"
+
     async def analyse(self, symbol: str, granularity: int = 60) -> Signal:
         """Full 1M microtrading analysis — entry and exit signals."""
 
@@ -203,14 +308,19 @@ class AIEngine:
         macd_signal = self._get("macd_signal", 9)
 
         rsi_period = self._get("rsi_period", 14)
-        rsi_overbought = self._get("rsi_overbought", 70.0)
-        rsi_oversold = self._get("rsi_oversold", 30.0)
 
-        # ── Fetch 1M candles ───────────────────────────────────────────────────
+        require_trend = self._get("require_trend_alignment", True)
+
+        # ── Fetch 1M candles + higher-timeframe trend, concurrently ─────────────
         try:
-            candles = await self.client.get_candles(
-                symbol, granularity=60, count=100
-            )
+            if require_trend:
+                candles, trend_direction = await asyncio.gather(
+                    self.client.get_candles(symbol, granularity=60, count=100),
+                    self._get_trend_direction(symbol),
+                )
+            else:
+                candles = await self.client.get_candles(symbol, granularity=60, count=100)
+                trend_direction = None
         except Exception as e:
             logger.error("ai_engine.candle_fetch_failed", symbol=symbol, error=str(e))
             return self._wait_signal(symbol, f"Unable to fetch candles: {str(e)}")
@@ -223,25 +333,10 @@ class AIEngine:
         highs = np.array([float(c["high"]) for c in candles])
         lows = np.array([float(c["low"]) for c in candles])
         closes = np.array([float(c["close"]) for c in candles])
-
-        # Apply price type for EMA
-        if ema_price.upper() == "OPEN":
-            ema_prices = opens
-        elif ema_price.upper() == "HIGH":
-            ema_prices = highs
-        elif ema_price.upper() == "LOW":
-            ema_prices = lows
-        elif ema_price.upper() == "MEDIAN":
-            ema_prices = (highs + lows) / 2.0
-        elif ema_price.upper() == "TYPICAL":
-            ema_prices = (highs + lows + closes) / 3.0
-        elif ema_price.upper() == "WEIGHTED":
-            ema_prices = (highs + lows + closes + closes) / 4.0
-        else:
-            ema_prices = closes
+        ema_prices = _apply_price(opens, highs, lows, closes, ema_price)
 
         # ── Calculate indicators ───────────────────────────────────────────────
-        ema3 = _ema(closes, ema_period)
+        ema3 = _ema(ema_prices, ema_period)
         _, bb_middle, _ = _bb_bands(closes, bb_period, bb_std_dev, bb_method)
         macd_line, signal_line, macd_hist = _macd_histogram(closes, macd_fast, macd_slow, macd_signal)
         rsi = _rsi(closes, rsi_period)
@@ -269,30 +364,50 @@ class AIEngine:
         rsi_high = rsi_now > 50  # Not necessarily > overbought
         rsi_low = rsi_now < 50
 
+        # ── Trend direction gate ────────────────────────────────────────────────
+        trend_bullish = (not require_trend) or (trend_direction == "BULLISH")
+        trend_bearish = (not require_trend) or (trend_direction == "BEARISH")
+
         signal = "WAIT"
         confidence = 0.0
         reason_parts = []
 
-        if bullish_cross and macd_positive and rsi_high:
+        if bullish_cross and macd_positive and rsi_high and trend_bullish:
             signal = "BUY"
             reason_parts = [
                 f"EMA({ema_period}) crossed above BB({bb_period}) middle",
                 f"MACD histogram > 0 ({macd_hist_now:.6f})",
                 f"RSI({rsi_period}) > 50 ({rsi_now:.1f})",
             ]
-            confidence = self._calc_confidence(bullish_cross, macd_positive, rsi_high)
+            if require_trend:
+                reason_parts.append("4H trend BULLISH (aligned)")
+            confidence = self._calc_confidence(
+                bullish_cross, macd_positive, rsi_high, trend_bullish if require_trend else None
+            )
 
-        elif bearish_cross and macd_negative and rsi_low:
+        elif bearish_cross and macd_negative and rsi_low and trend_bearish:
             signal = "SELL"
             reason_parts = [
                 f"EMA({ema_period}) crossed below BB({bb_period}) middle",
                 f"MACD histogram < 0 ({macd_hist_now:.6f})",
                 f"RSI({rsi_period}) < 50 ({rsi_now:.1f})",
             ]
-            confidence = self._calc_confidence(bearish_cross, macd_negative, rsi_low)
+            if require_trend:
+                reason_parts.append("4H trend BEARISH (aligned)")
+            confidence = self._calc_confidence(
+                bearish_cross, macd_negative, rsi_low, trend_bearish if require_trend else None
+            )
 
         else:
             # WAIT — diagnose why
+            if require_trend and bullish_cross and macd_positive and rsi_high and not trend_bullish:
+                reason_parts.append(
+                    f"1M BUY conditions met but 4H trend is {trend_direction or 'unavailable'} (needs BULLISH)"
+                )
+            elif require_trend and bearish_cross and macd_negative and rsi_low and not trend_bearish:
+                reason_parts.append(
+                    f"1M SELL conditions met but 4H trend is {trend_direction or 'unavailable'} (needs BEARISH)"
+                )
             if not bullish_cross and not bearish_cross:
                 reason_parts.append(f"No EMA/BB crossover (EMA: {ema3_now:.5f}, BB: {bb_mid_now:.5f})")
             if not macd_positive and not macd_negative:
@@ -340,6 +455,7 @@ class AIEngine:
             macd_hist=round(macd_hist_now, 6),
             rsi=round(rsi_now, 1),
             volatility=volatility,
+            trend_direction=trend_direction,
         )
 
         return Signal(
@@ -352,6 +468,7 @@ class AIEngine:
             macd_histogram=round(macd_hist_now, 6),
             rsi_value=round(rsi_now, 1),
             volatility=volatility,
+            trend_direction=trend_direction,
         )
 
     async def check_exit_signal(self, symbol: str, trade_type: str, granularity: int = 60) -> bool:
@@ -430,17 +547,33 @@ class AIEngine:
             )
             return False
 
-    def _calc_confidence(self, crossover: bool, macd_ok: bool, rsi_ok: bool) -> float:
+    def _calc_confidence(
+        self, crossover: bool, macd_ok: bool, rsi_ok: bool, trend_ok: Optional[bool] = None
+    ) -> float:
         """
         Confidence score (0-1).
-        All 3 conditions met = high confidence.
+
+        With trend gating enabled (trend_ok is not None), all 4 conditions
+        contribute; without it, just the 3 original 1M conditions.
         """
+        if trend_ok is None:
+            score = 0.0
+            if crossover:
+                score += 0.4
+            if macd_ok:
+                score += 0.3
+            if rsi_ok:
+                score += 0.3
+            return min(round(score, 3), 1.0)
+
         score = 0.0
         if crossover:
-            score += 0.4
-        if macd_ok:
             score += 0.3
+        if macd_ok:
+            score += 0.2
         if rsi_ok:
+            score += 0.2
+        if trend_ok:
             score += 0.3
         return min(round(score, 3), 1.0)
 

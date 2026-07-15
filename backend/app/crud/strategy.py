@@ -21,10 +21,14 @@ async def get_strategy_settings(db: AsyncSession, user_id: int) -> StrategySetti
 
 
 async def update_strategy_settings(
-    db: AsyncSession, user_id: int, data: StrategySettingsUpdate
+    db: AsyncSession, user_id: int, data: StrategySettingsUpdate, full_update: bool = False
 ) -> StrategySettings:
+    """
+    Apply a partial (PUT from the app, exclude_unset=True) or full
+    (reset-to-defaults, every field applied) update.
+    """
     settings = await get_strategy_settings(db, user_id)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    for field, value in data.model_dump(exclude_unset=not full_update).items():
         setattr(settings, field, value)
     await db.flush()
     return settings

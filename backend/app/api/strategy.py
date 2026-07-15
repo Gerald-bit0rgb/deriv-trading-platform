@@ -47,6 +47,6 @@ async def reset_strategy(
 ):
     """Reset all strategy settings to EA defaults."""
     defaults = StrategySettingsUpdate()
-    settings = await update_strategy_settings(db, current_user.id, defaults)
+    settings = await update_strategy_settings(db, current_user.id, defaults, full_update=True)
     logger.info("strategy.reset", user_id=current_user.id)
     return settings
