@@ -3,19 +3,25 @@ AI Trading Signal Engine — 1-Minute Microtrading Strategy
 
 Strategy logic:
 
-  BUY signal — all 3 must be true simultaneously:
-    1. EMA 3 crosses ABOVE BB middle band (18-period SMA)
-    2. MACD Histogram value > 0
-    3. RSI 14 > 50
+  ENTRY signals:
+    BUY signal — all 3 must be true simultaneously:
+      1. EMA 3 crosses ABOVE BB middle band (18-period SMA)
+      2. MACD Histogram value > 0
+      3. RSI 14 > 50
 
-  SELL signal — all 3 must be true simultaneously:
-    1. EMA 3 crosses BELOW BB middle band
-    2. MACD Histogram value < 0
-    3. RSI 14 < 50
+    SELL signal — all 3 must be true simultaneously:
+      1. EMA 3 crosses BELOW BB middle band
+      2. MACD Histogram value < 0
+      3. RSI 14 < 50
 
-  EXIT logic:
-    - Trailing stop on winning trades (default 2 pips)
-    - No hard take-profit (scalp and exit fast)
+  EXIT signals (crossback):
+    BUY trade closes when:
+      - EMA 3 crosses BELOW BB middle band (bearish crossback)
+    
+    SELL trade closes when:
+      - EMA 3 crosses ABOVE BB middle band (bullish crossback)
+
+  NO duration-based exits — trades stay open until crossback exit signal
 """
 import asyncio
 from dataclasses import dataclass, field
@@ -37,7 +43,7 @@ logger = get_logger(__name__)
 @dataclass
 class Signal:
     symbol: str
-    signal: str                       # BUY | SELL | WAIT
+    signal: str                       # BUY | SELL | WAIT | EXIT
     confidence: float                 # 0.0 – 1.0
     reason: str
     ema3_value: Optional[float] = None
@@ -161,7 +167,7 @@ def _atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 
     return float(np.mean(tr[-period:])) if len(tr) >= period else float(np.mean(tr))
 
 
-# ────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────��───
 # 1-Minute Microtrading AI Engine
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -169,6 +175,7 @@ class AIEngine:
     """
     1-Minute Microtrading strategy — fully configurable parameters.
     Indicators: EMA 3, Bollinger Bands 18, MACD (9, 12, 26), RSI 14
+    Exit: Crossback (EMA crosses back through BB middle)
     """
 
     def __init__(self, client: DerivClient, settings=None):
@@ -181,7 +188,7 @@ class AIEngine:
         return default
 
     async def analyse(self, symbol: str, granularity: int = 60) -> Signal:
-        """Full 1M microtrading analysis using configured or default parameters."""
+        """Full 1M microtrading analysis — entry and exit signals."""
 
         # ── Load parameters ────────────────────────────────────────────────────
         ema_period = self._get("ema_fast_period", 3)
@@ -346,6 +353,82 @@ class AIEngine:
             rsi_value=round(rsi_now, 1),
             volatility=volatility,
         )
+
+    async def check_exit_signal(self, symbol: str, trade_type: str, granularity: int = 60) -> bool:
+        """
+        Check if an open trade should be exited based on crossback signal.
+
+        Args:
+            symbol: Trading symbol
+            trade_type: "BUY" or "SELL"
+            granularity: Timeframe in seconds (60 = 1M)
+
+        Returns:
+            True if exit signal is triggered, False otherwise
+
+        Exit rules:
+          - BUY trade closes when EMA crosses BELOW BB middle (bearish crossback)
+          - SELL trade closes when EMA crosses ABOVE BB middle (bullish crossback)
+        """
+        try:
+            ema_period = self._get("ema_fast_period", 3)
+            bb_period = self._get("bb_period", 18)
+            bb_std_dev = self._get("bb_std_dev", 2.0)
+            bb_method = self._get("bb_method", "SMA")
+
+            candles = await self.client.get_candles(symbol, granularity=60, count=50)
+            if len(candles) < bb_period + 3:
+                return False
+
+            closes = np.array([float(c["close"]) for c in candles])
+            ema3 = _ema(closes, ema_period)
+            _, bb_middle, _ = _bb_bands(closes, bb_period, bb_std_dev, bb_method)
+
+            # Current and previous bar
+            ema3_now = ema3[-2]
+            ema3_prev = ema3[-3] if len(ema3) >= 3 else ema3[-2]
+
+            bb_mid_now = bb_middle[-2] if not np.isnan(bb_middle[-2]) else closes[-2]
+            bb_mid_prev = bb_middle[-3] if len(bb_middle) >= 3 and not np.isnan(bb_middle[-3]) else bb_mid_now
+
+            ema_above_bb_now = ema3_now > bb_mid_now
+            ema_above_bb_prev = ema3_prev > bb_mid_prev
+
+            # ── Exit logic ────────────────────────────────────────────────────
+            if trade_type == "BUY":
+                # BUY closes when EMA crosses BELOW BB middle (bearish crossback)
+                bearish_cross = ema_above_bb_prev and (not ema_above_bb_now)
+                if bearish_cross:
+                    logger.info(
+                        "ai_engine.exit_signal",
+                        symbol=symbol,
+                        trade_type=trade_type,
+                        reason="EMA crossed below BB middle (bearish crossback)",
+                    )
+                    return True
+
+            elif trade_type == "SELL":
+                # SELL closes when EMA crosses ABOVE BB middle (bullish crossback)
+                bullish_cross = (not ema_above_bb_prev) and ema_above_bb_now
+                if bullish_cross:
+                    logger.info(
+                        "ai_engine.exit_signal",
+                        symbol=symbol,
+                        trade_type=trade_type,
+                        reason="EMA crossed above BB middle (bullish crossback)",
+                    )
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.error(
+                "ai_engine.exit_check_failed",
+                symbol=symbol,
+                trade_type=trade_type,
+                error=str(e),
+            )
+            return False
 
     def _calc_confidence(self, crossover: bool, macd_ok: bool, rsi_ok: bool) -> float:
         """
