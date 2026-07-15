@@ -1,6 +1,7 @@
 """
 StrategySettings model — stores 1-Minute Microtrading strategy parameters per user.
 Indicators: EMA 3, Bollinger Bands 18, MACD (9, 12, 26), RSI 14
+Exit: Crossback (EMA crosses BB) — NO duration-based exits
 """
 from __future__ import annotations
 
@@ -48,15 +49,11 @@ class StrategySettings(Base):
     rsi_overbought: Mapped[float] = mapped_column(Float, default=70.0)
     rsi_oversold: Mapped[float] = mapped_column(Float, default=30.0)
 
-    # ── Trade duration ────────────────────────────────────────────────────────
-    # For 1M scalping: typically 1-5 minutes (ticks or minutes)
-    trade_duration: Mapped[int] = mapped_column(Integer, default=2)
-    trade_duration_unit: Mapped[str] = mapped_column(String(5), default="m")
-
-    # ── Risk management ───────────────────────────────────────────────────────
-    # Trailing stop (pips or %) or hard TP disabled for scalping
-    trailing_stop_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    trailing_stop_distance: Mapped[float] = mapped_column(Float, default=2.0)  # pips
+    # ── Exit signals ──────────────────────────────────────────────────────────
+    # NO duration-based exits — trades exit on crossback (EMA crosses BB)
+    # BUY closes when EMA crosses BELOW BB middle
+    # SELL closes when EMA crosses ABOVE BB middle
+    exit_on_crossback_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -67,4 +64,4 @@ class StrategySettings(Base):
     user: Mapped["User"] = relationship(back_populates="strategy_settings")
 
     def __repr__(self) -> str:
-        return f"<StrategySettings user_id={self.user_id} strategy=1M_Microtrading>"
+        return f"<StrategySettings user_id={self.user_id} strategy=1M_Microtrading_Crossback>"
