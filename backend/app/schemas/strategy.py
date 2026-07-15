@@ -1,5 +1,6 @@
 """
 Pydantic schemas for 1-Minute Microtrading Strategy Settings endpoints.
+Exit: Crossback only (no duration) — EA-style trading.
 """
 from pydantic import BaseModel, Field
 
@@ -27,13 +28,9 @@ class StrategySettingsUpdate(BaseModel):
     rsi_overbought: float = Field(default=70.0, ge=50, le=100)
     rsi_oversold: float = Field(default=30.0, ge=0, le=50)
 
-    # ── Trade duration ───────────────────────────────────────────────────────
-    trade_duration: int = Field(default=2, ge=1, le=10, description="Duration in minutes")
-    trade_duration_unit: str = Field(default="m", description="m=minutes, t=ticks")
-
-    # ── Risk management ──────────────────────────────────────────────────────
-    trailing_stop_enabled: bool = Field(default=True)
-    trailing_stop_distance: float = Field(default=2.0, ge=0.5, le=10.0, description="Distance in pips")
+    # ── Exit signals ──────────────────────────────────────────────────────────
+    # NO duration fields — exit on crossback (EMA crosses BB) only
+    exit_on_crossback_enabled: bool = Field(default=True, description="Exit when EMA crosses back through BB middle")
 
 
 class StrategySettingsResponse(StrategySettingsUpdate):
