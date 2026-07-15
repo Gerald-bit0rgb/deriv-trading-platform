@@ -1,6 +1,6 @@
 """
-StrategySettings model — stores MA Bias Basket strategy parameters per user.
-All fields match the MQL5 EA inputs exactly.
+StrategySettings model — stores 1-Minute Microtrading strategy parameters per user.
+Indicators: EMA 3, Bollinger Bands 18, MACD (9, 12, 26), RSI 14
 """
 from __future__ import annotations
 
@@ -24,49 +24,39 @@ class StrategySettings(Base):
         Integer, ForeignKey("users.id"), unique=True, nullable=False
     )
 
-    # ── 4H Bias timeframe ─────────────────────────────────────────────────────
-    # Timeframe in seconds: 3600=1H, 14400=4H, 86400=1D
-    bias_timeframe: Mapped[int] = mapped_column(Integer, default=14400)
-    bias_fast_period: Mapped[int] = mapped_column(Integer, default=5)
-    bias_slow_period: Mapped[int] = mapped_column(Integer, default=13)
-    # MA method: EMA | SMA | WMA | SMMA
-    bias_ma_method: Mapped[str] = mapped_column(String(10), default="EMA")
-    # Applied price: CLOSE | OPEN | HIGH | LOW | MEDIAN | TYPICAL | WEIGHTED
-    bias_applied_price: Mapped[str] = mapped_column(String(10), default="CLOSE")
+    # ── 1M Microtrading Strategy ───────────────────────────────────────────────
+    # Entry timeframe: 60=1M (hardcoded)
+    entry_timeframe: Mapped[int] = mapped_column(Integer, default=60)
 
-    # ── ADX filter ────────────────────────────────────────────────────────────
-    adx_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    adx_period: Mapped[int] = mapped_column(Integer, default=14)
-    adx_threshold: Mapped[float] = mapped_column(Float, default=20.0)
+    # ── EMA 3 (fast entry signal) ──────────────────────────────────────────────
+    ema_fast_period: Mapped[int] = mapped_column(Integer, default=3)
+    ema_applied_price: Mapped[str] = mapped_column(String(10), default="CLOSE")
 
-    # ── 15M Entry timeframe ───────────────────────────────────────────────────
-    # Timeframe in seconds: 60=1M, 300=5M, 900=15M, 1800=30M, 3600=1H
-    entry_timeframe: Mapped[int] = mapped_column(Integer, default=900)
-    entry_fast_period: Mapped[int] = mapped_column(Integer, default=5)
-    # MA method for fast entry MA
-    entry_fast_method: Mapped[str] = mapped_column(String(10), default="EMA")
-    entry_slow_period: Mapped[int] = mapped_column(Integer, default=50)
-    # MA method for slow entry MA
-    entry_slow_method: Mapped[str] = mapped_column(String(10), default="SMA")
-    # Applied price for entry MAs
-    entry_applied_price: Mapped[str] = mapped_column(String(10), default="TYPICAL")
+    # ── Bollinger Bands 18 (signal line) ───────────────────────────────────────
+    bb_period: Mapped[int] = mapped_column(Integer, default=18)
+    bb_std_dev: Mapped[float] = mapped_column(Float, default=2.0)
+    # BB method: SMA | EMA
+    bb_method: Mapped[str] = mapped_column(String(10), default="SMA")
 
-    # ── Emergency exit ────────────────────────────────────────────────────────
-    emergency_exit_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    # SMA period used for emergency exit (applied to entry timeframe)
-    exit_sma_period: Mapped[int] = mapped_column(Integer, default=50)
+    # ── MACD Histogram (9, 12, 26) ────────────────────────────────────────────
+    macd_fast: Mapped[int] = mapped_column(Integer, default=12)
+    macd_slow: Mapped[int] = mapped_column(Integer, default=26)
+    macd_signal: Mapped[int] = mapped_column(Integer, default=9)
+
+    # ── RSI 14 ───────────────────────────────────────────────────────────────
+    rsi_period: Mapped[int] = mapped_column(Integer, default=14)
+    rsi_overbought: Mapped[float] = mapped_column(Float, default=70.0)
+    rsi_oversold: Mapped[float] = mapped_column(Float, default=30.0)
 
     # ── Trade duration ────────────────────────────────────────────────────────
-    trade_duration: Mapped[int] = mapped_column(Integer, default=5)
-    # Duration unit: t=ticks, s=seconds, m=minutes
-    trade_duration_unit: Mapped[str] = mapped_column(String(5), default="t")
+    # For 1M scalping: typically 1-5 minutes (ticks or minutes)
+    trade_duration: Mapped[int] = mapped_column(Integer, default=2)
+    trade_duration_unit: Mapped[str] = mapped_column(String(5), default="m")
 
-    # ── Confirmation filter ───────────────────────────────────────────────────
-    require_candle_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # ── MA Cross Exit ─────────────────────────────────────────────────────────
-    # Close trade early when entry MAs cross against the open position
-    ma_cross_exit_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # ── Risk management ───────────────────────────────────────────────────────
+    # Trailing stop (pips or %) or hard TP disabled for scalping
+    trailing_stop_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    trailing_stop_distance: Mapped[float] = mapped_column(Float, default=2.0)  # pips
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -77,4 +67,4 @@ class StrategySettings(Base):
     user: Mapped["User"] = relationship(back_populates="strategy_settings")
 
     def __repr__(self) -> str:
-        return f"<StrategySettings user_id={self.user_id}>"
+        return f"<StrategySettings user_id={self.user_id} strategy=1M_Microtrading>"
