@@ -22,7 +22,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   bool _isLoading = false;
   String? _error;
   bool _isAutoTrading = false;
-  double _autoStake = 1.0;
+  double _autoLotSize = 0.01;
 
   Future<void> _analyse() async {
     setState(() { _isLoading = true; _error = null; });
@@ -48,9 +48,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
     try {
       final result = await ref.read(aiServiceProvider).autoTrade(
         symbol: _selectedSymbol,
-        stake: _autoStake,
-        duration: 5,
-        durationUnit: 't',
+        lotSize: _autoLotSize,
       );
       if (mounted) {
         final executed = result['executed'] as bool? ?? false;
@@ -169,13 +167,13 @@ class _AiScreenState extends ConsumerState<AiScreen> {
                 children: [
                   Expanded(
                     child: TextFormField(
-                      initialValue: _autoStake.toString(),
+                      initialValue: _autoLotSize.toString(),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
-                        labelText: 'Stake (USD)',
-                        prefixIcon: Icon(Icons.attach_money),
+                        labelText: 'Lot Size',
+                        prefixIcon: Icon(Icons.scale),
                       ),
-                      onChanged: (v) => _autoStake = double.tryParse(v) ?? 1.0,
+                      onChanged: (v) => _autoLotSize = double.tryParse(v) ?? 0.01,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -284,21 +282,35 @@ class _SignalCard extends StatelessWidget {
           const SizedBox(height: 16),
 
           // ── Indicators row ────────────────────────────────────────────────
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              _Chip(label: 'Trend', value: signal.trend, color: AppColors.info),
-              const SizedBox(width: 8),
+              if (signal.trendDirection != null)
+                _Chip(
+                  label: '4H Trend',
+                  value: signal.trendDirection!,
+                  color: signal.trendDirection == 'BULLISH'
+                      ? AppColors.buyColor
+                      : signal.trendDirection == 'BEARISH'
+                          ? AppColors.sellColor
+                          : AppColors.textMuted,
+                ),
               _Chip(label: 'Vol', value: signal.volatility,
                 color: signal.volatility == 'HIGH'
                     ? AppColors.danger
                     : signal.volatility == 'MEDIUM'
                         ? AppColors.warning
                         : AppColors.success),
-              if (signal.pattern != null) ...[
-                const SizedBox(width: 8),
-                _Chip(label: 'Pattern', value: signal.pattern!,
+              if (signal.rsiValue != null)
+                _Chip(label: 'RSI', value: signal.rsiValue!.toStringAsFixed(1),
                     color: AppColors.accent),
-              ],
+              if (signal.macdHistogram != null)
+                _Chip(
+                  label: 'MACD',
+                  value: signal.macdHistogram!.toStringAsFixed(5),
+                  color: signal.macdHistogram! > 0 ? AppColors.buyColor : AppColors.sellColor,
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -318,14 +330,14 @@ class _SignalCard extends StatelessWidget {
             style: const TextStyle(fontSize: 13),
           ),
 
-          if (signal.entryPrice != null) ...[
+          if (signal.ema3Value != null && signal.bbMiddle != null) ...[
             const SizedBox(height: 10),
             Row(
               children: [
-                const Icon(Icons.place_outlined, size: 14, color: AppColors.textMuted),
+                const Icon(Icons.show_chart, size: 14, color: AppColors.textMuted),
                 const SizedBox(width: 4),
                 Text(
-                  'Entry Price: ${signal.entryPrice!.toStringAsFixed(5)}',
+                  'EMA3: ${signal.ema3Value!.toStringAsFixed(5)}  •  BB Mid: ${signal.bbMiddle!.toStringAsFixed(5)}',
                   style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
               ],

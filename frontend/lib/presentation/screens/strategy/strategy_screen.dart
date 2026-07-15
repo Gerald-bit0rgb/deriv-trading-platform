@@ -30,15 +30,6 @@ const _timeframes = [
   {'label': '1 Day',      'value': 86400},
 ];
 
-// Trade duration units — all Deriv-supported
-const _durationUnits = [
-  {'label': 'Ticks',   'value': 't'},
-  {'label': 'Seconds', 'value': 's'},
-  {'label': 'Minutes', 'value': 'm'},
-  {'label': 'Hours',   'value': 'h'},
-  {'label': 'Days',    'value': 'd'},
-];
-
 const _maMethods = ['EMA', 'SMA', 'WMA', 'SMMA'];
 
 const _appliedPrices = [
@@ -95,11 +86,10 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
       builder: (_) => AlertDialog(
         title: const Text('Reset to Defaults'),
         content: const Text(
-            'Reset all strategy settings to the original EA defaults?\n\n'
-            '4H EMA5/EMA13 bias + ADX(14) >= 20\n'
-            '15M EMA5 vs SMA50 on Typical Price\n'
-            'Emergency exit on SMA50\n'
-            '5 ticks duration'),
+            'Reset all strategy settings to the original defaults?\n\n'
+            'Trend: 4H EMA 5 / EMA 13\n'
+            'Entry: 1M EMA 3 / BB(18) / MACD(12,26,9) / RSI(14)\n'
+            'Exit: Crossback only (no duration)'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -124,7 +114,7 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
       ref.invalidate(strategyProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Settings reset to EA defaults'),
+          content: Text('Settings reset to defaults'),
           backgroundColor: AppColors.info,
         ));
       }
@@ -141,13 +131,11 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
       appBar: AppBar(
         title: const Text('Strategy Settings'),
         actions: [
-          // Reset button
           IconButton(
             icon: const Icon(Icons.restore),
-            tooltip: 'Reset to EA defaults',
+            tooltip: 'Reset to defaults',
             onPressed: _isSaving ? null : _reset,
           ),
-          // Save button
           IconButton(
             icon: _isSaving
                 ? const SizedBox(
@@ -193,7 +181,7 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Changes apply on the next bot restart. Tap ↺ to reset to EA defaults.',
+                  'Changes apply on the next bot restart. Tap ↺ to reset to defaults.',
                   style: TextStyle(fontSize: 12, color: AppColors.info),
                 ),
               ),
@@ -201,35 +189,50 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
           ),
         ),
 
-        // ── BIAS TIMEFRAME SECTION ─────────────────────────────────────────
+        // ── TREND DIRECTION SECTION ─────────────────────────────────────────
         _SectionHeader(
-          title: 'BIAS TIMEFRAME',
-          subtitle: 'Determines market direction (like your 4H)',
+          title: 'TREND DIRECTION',
+          subtitle: 'Higher-timeframe filter — gates every entry (e.g. 4H EMA 5 vs EMA 13)',
           color: AppColors.primary,
         ),
+        SwitchListTile(
+          title: const Text('Require Trend Alignment',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text(
+            'BUY only when trend is bullish, SELL only when bearish.\n'
+            'Turn off to trade the 1M confirmation signals alone.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+          value: _settings!.requireTrendAlignment,
+          onChanged: (v) => setState(
+              () => _settings = _settings!.copyWith(requireTrendAlignment: v)),
+          activeColor: AppColors.primary,
+          contentPadding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: 8),
         _TfDropdown(
-          label: 'Bias Timeframe',
-          value: _settings!.biasTimeframe,
+          label: 'Trend Timeframe',
+          value: _settings!.trendTimeframe,
           onChanged: (v) =>
-              setState(() => _settings = _settings!.copyWith(biasTimeframe: v)),
+              setState(() => _settings = _settings!.copyWith(trendTimeframe: v)),
         ),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(
             child: _IntField(
-              label: 'Fast Period',
-              value: _settings!.biasFastPeriod,
+              label: 'Fast MA Period',
+              value: _settings!.trendFastPeriod,
               onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(biasFastPeriod: v)),
+                  () => _settings = _settings!.copyWith(trendFastPeriod: v)),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _IntField(
-              label: 'Slow Period',
-              value: _settings!.biasSlowPeriod,
+              label: 'Slow MA Period',
+              value: _settings!.trendSlowPeriod,
               onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(biasSlowPeriod: v)),
+                  () => _settings = _settings!.copyWith(trendSlowPeriod: v)),
             ),
           ),
         ]),
@@ -238,271 +241,190 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
           Expanded(
             child: _DropField(
               label: 'MA Method',
-              value: _settings!.biasMaMethod,
+              value: _settings!.trendMaMethod,
               items: _maMethods,
               onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(biasMaMethod: v)),
+                  () => _settings = _settings!.copyWith(trendMaMethod: v)),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _DropField(
               label: 'Applied Price',
-              value: _settings!.biasAppliedPrice,
+              value: _settings!.trendAppliedPrice,
               items: _appliedPrices,
               onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(biasAppliedPrice: v)),
+                  () => _settings = _settings!.copyWith(trendAppliedPrice: v)),
             ),
           ),
         ]),
 
         const SizedBox(height: 24),
 
-        // ── ADX FILTER SECTION ─────────────────────────────────────────────
+        // ── ENTRY CONFIRMATION SECTION ───────────────────────────────────────
         _SectionHeader(
-          title: 'ADX FILTER',
-          subtitle: 'Confirms trend strength before entry',
-          color: AppColors.warning,
-        ),
-        SwitchListTile(
-          title: const Text('Enable ADX Filter',
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: const Text('Only trade when trend is strong enough',
-              style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-          value: _settings!.adxEnabled,
-          onChanged: (v) =>
-              setState(() => _settings = _settings!.copyWith(adxEnabled: v)),
-          activeColor: AppColors.warning,
-          contentPadding: EdgeInsets.zero,
-        ),
-        if (_settings!.adxEnabled) ...[
-          Row(children: [
-            Expanded(
-              child: _IntField(
-                label: 'ADX Period',
-                value: _settings!.adxPeriod,
-                onChanged: (v) => setState(
-                    () => _settings = _settings!.copyWith(adxPeriod: v)),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _DoubleField(
-                label: 'ADX Threshold',
-                value: _settings!.adxThreshold,
-                hint: 'e.g. 20.0',
-                onChanged: (v) => setState(
-                    () => _settings = _settings!.copyWith(adxThreshold: v)),
-              ),
-            ),
-          ]),
-        ],
-
-        const SizedBox(height: 24),
-
-        // ── ENTRY TIMEFRAME SECTION ────────────────────────────────────────
-        _SectionHeader(
-          title: 'ENTRY TIMEFRAME',
-          subtitle: 'Triggers the actual trade (like your 15M)',
-          color: AppColors.success,
-        ),
-        _TfDropdown(
-          label: 'Entry Timeframe',
-          value: _settings!.entryTimeframe,
-          onChanged: (v) =>
-              setState(() => _settings = _settings!.copyWith(entryTimeframe: v)),
-        ),
-        const SizedBox(height: 12),
-
-        // Fast MA
-        const _SubHeader(title: 'Fast MA (EMA5 in EA)'),
-        Row(children: [
-          Expanded(
-            child: _IntField(
-              label: 'Fast Period',
-              value: _settings!.entryFastPeriod,
-              onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(entryFastPeriod: v)),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _DropField(
-              label: 'Fast Method',
-              value: _settings!.entryFastMethod,
-              items: _maMethods,
-              onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(entryFastMethod: v)),
-            ),
-          ),
-        ]),
-        const SizedBox(height: 12),
-
-        // Slow MA
-        const _SubHeader(title: 'Slow MA (SMA50 in EA)'),
-        Row(children: [
-          Expanded(
-            child: _IntField(
-              label: 'Slow Period',
-              value: _settings!.entrySlowPeriod,
-              onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(entrySlowPeriod: v)),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _DropField(
-              label: 'Slow Method',
-              value: _settings!.entrySlowMethod,
-              items: _maMethods,
-              onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(entrySlowMethod: v)),
-            ),
-          ),
-        ]),
-        const SizedBox(height: 12),
-
-        _DropField(
-          label: 'Applied Price (both entry MAs)',
-          value: _settings!.entryAppliedPrice,
-          items: _appliedPrices,
-          onChanged: (v) => setState(
-              () => _settings = _settings!.copyWith(entryAppliedPrice: v)),
-        ),
-
-        const SizedBox(height: 24),
-
-        // ── EMERGENCY EXIT SECTION ─────────────────────────────────────────
-        _SectionHeader(
-          title: 'EMERGENCY EXIT',
-          subtitle: 'Closes basket when candle crosses SMA',
-          color: AppColors.danger,
-        ),
-        SwitchListTile(
-          title: const Text('Enable Emergency Exit',
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: const Text(
-              'Close all trades if candle closes against the SMA',
-              style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-          value: _settings!.emergencyExitEnabled,
-          onChanged: (v) => setState(
-              () => _settings = _settings!.copyWith(emergencyExitEnabled: v)),
-          activeColor: AppColors.danger,
-          contentPadding: EdgeInsets.zero,
-        ),
-        if (_settings!.emergencyExitEnabled)
-          _IntField(
-            label: 'Exit SMA Period (default: 50)',
-            value: _settings!.exitSmaPeriod,
-            onChanged: (v) => setState(
-                () => _settings = _settings!.copyWith(exitSmaPeriod: v)),
-          ),
-
-        const SizedBox(height: 24),
-
-        // ── CANDLE CONFIRMATION SECTION ────────────────────────────────────
-        _SectionHeader(
-          title: 'CANDLE CONFIRMATION',
-          subtitle:
-              'Previous candle must close higher/lower than the one before it',
+          title: 'ENTRY CONFIRMATION',
+          subtitle: '1-minute microtrading signal — EMA / Bollinger Bands / MACD / RSI',
           color: AppColors.accent,
         ),
-        SwitchListTile(
-          title: const Text('Require Higher/Lower Close Confirmation',
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: const Text(
-            'OFF = original EA logic\n'
-            '      Current candle just needs to close above/below EMA\n\n'
-            'ON = stricter momentum filter\n'
-            '      For BUY: previous candle close must be HIGHER than\n'
-            '      the candle before it (upward momentum confirmed)\n'
-            '      For SELL: previous candle close must be LOWER than\n'
-            '      the candle before it (downward momentum confirmed)',
-            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+
+        _SubHeader(title: 'EMA (fast entry line)'),
+        Row(children: [
+          Expanded(
+            child: _IntField(
+              label: 'EMA Period',
+              value: _settings!.emaFastPeriod,
+              onChanged: (v) => setState(
+                  () => _settings = _settings!.copyWith(emaFastPeriod: v)),
+            ),
           ),
-          value: _settings!.requireCandleConfirmation,
-          onChanged: (v) => setState(() => _settings =
-              _settings!.copyWith(requireCandleConfirmation: v)),
-          activeColor: AppColors.accent,
-          contentPadding: EdgeInsets.zero,
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DropField(
+              label: 'Applied Price',
+              value: _settings!.emaAppliedPrice,
+              items: _appliedPrices,
+              onChanged: (v) => setState(
+                  () => _settings = _settings!.copyWith(emaAppliedPrice: v)),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 16),
+
+        _SubHeader(title: 'Bollinger Bands (signal line)'),
+        Row(children: [
+          Expanded(
+            child: _IntField(
+              label: 'BB Period',
+              value: _settings!.bbPeriod,
+              onChanged: (v) =>
+                  setState(() => _settings = _settings!.copyWith(bbPeriod: v)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DoubleField(
+              label: 'Std Dev',
+              hint: 'e.g. 2.0',
+              value: _settings!.bbStdDev,
+              onChanged: (v) =>
+                  setState(() => _settings = _settings!.copyWith(bbStdDev: v)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DropField(
+              label: 'Method',
+              value: _settings!.bbMethod,
+              items: const ['SMA', 'EMA'],
+              onChanged: (v) =>
+                  setState(() => _settings = _settings!.copyWith(bbMethod: v)),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 16),
+
+        _SubHeader(title: 'MACD Histogram'),
+        Row(children: [
+          Expanded(
+            child: _IntField(
+              label: 'Fast',
+              value: _settings!.macdFast,
+              onChanged: (v) =>
+                  setState(() => _settings = _settings!.copyWith(macdFast: v)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _IntField(
+              label: 'Slow',
+              value: _settings!.macdSlow,
+              onChanged: (v) =>
+                  setState(() => _settings = _settings!.copyWith(macdSlow: v)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _IntField(
+              label: 'Signal',
+              value: _settings!.macdSignal,
+              onChanged: (v) => setState(
+                  () => _settings = _settings!.copyWith(macdSignal: v)),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 16),
+
+        _SubHeader(title: 'RSI'),
+        Row(children: [
+          Expanded(
+            child: _IntField(
+              label: 'RSI Period',
+              value: _settings!.rsiPeriod,
+              onChanged: (v) =>
+                  setState(() => _settings = _settings!.copyWith(rsiPeriod: v)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DoubleField(
+              label: 'Overbought',
+              hint: 'e.g. 70',
+              value: _settings!.rsiOverbought,
+              onChanged: (v) => setState(
+                  () => _settings = _settings!.copyWith(rsiOverbought: v)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DoubleField(
+              label: 'Oversold',
+              hint: 'e.g. 30',
+              value: _settings!.rsiOversold,
+              onChanged: (v) => setState(
+                  () => _settings = _settings!.copyWith(rsiOversold: v)),
+            ),
+          ),
+        ]),
+        Container(
+          padding: const EdgeInsets.all(10),
+          margin: const EdgeInsets.only(top: 8),
+          decoration: BoxDecoration(
+            color: AppColors.info.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.info.withOpacity(0.3)),
+          ),
+          child: const Text(
+            'Entry uses a fixed RSI > 50 / < 50 midline check, not these '
+            'overbought/oversold levels — they\'re kept here for your own '
+            'reference and future strategy tuning.',
+            style: TextStyle(fontSize: 12, color: AppColors.info),
+          ),
         ),
 
         const SizedBox(height: 24),
 
-        // ── MA CROSS EXIT SECTION ──────────────────────────────────────────
+        // ── EXIT SECTION ──────────────────────────────────────────────────
         _SectionHeader(
-          title: 'MA CROSS EXIT',
-          subtitle: 'Close trade early when entry MAs cross against position',
+          title: 'EXIT — CROSSBACK',
+          subtitle: 'EA-style exit — no fixed duration',
           color: AppColors.primary,
         ),
         SwitchListTile(
-          title: const Text('Enable MA Cross Exit',
+          title: const Text('Enable Crossback Exit',
               style: TextStyle(fontWeight: FontWeight.w600)),
           subtitle: const Text(
-            'Priority 1 — fires before duration expires\n\n'
-            'BUY trade open:\n'
-            '  → When EMA(fast) crosses BELOW SMA(slow) → sell early\n\n'
-            'SELL trade open:\n'
-            '  → When EMA(fast) crosses ABOVE SMA(slow) → sell early\n\n'
-            'Uses the same MAs you set in Entry section above.\n'
-            'Duration becomes a safety net if no cross fires.',
+            'BUY closes when EMA crosses BELOW BB middle.\n'
+            'SELL closes when EMA crosses ABOVE BB middle.\n'
+            'Combine with Trailing Stop (Risk Settings) to lock in profit sooner.',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
-          value: _settings!.maCrossExitEnabled,
+          value: _settings!.exitOnCrossbackEnabled,
           onChanged: (v) => setState(() =>
-              _settings = _settings!.copyWith(maCrossExitEnabled: v)),
+              _settings = _settings!.copyWith(exitOnCrossbackEnabled: v)),
           activeColor: AppColors.primary,
           contentPadding: EdgeInsets.zero,
         ),
-        if (_settings!.maCrossExitEnabled)
-          Container(
-            padding: const EdgeInsets.all(10),
-            margin: const EdgeInsets.only(top: 8),
-            decoration: BoxDecoration(
-              color: AppColors.info.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.info.withOpacity(0.3)),
-            ),
-            child: const Text(
-              'Tip: Set a longer trade duration (e.g. 30 minutes or 1 hour) '
-              'as a safety net. The MA cross will exit early in most cases.',
-              style: TextStyle(fontSize: 12, color: AppColors.info),
-            ),
-          ),
-
-        const SizedBox(height: 24),
-
-        // ── TRADE DURATION SECTION ─────────────────────────────────────────
-        _SectionHeader(
-          title: 'TRADE DURATION',
-          subtitle: 'How long each contract runs',
-          color: AppColors.accent,
-        ),
-        Row(children: [
-          Expanded(
-            child: _IntField(
-              label: 'Duration',
-              value: _settings!.tradeDuration,
-              onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(tradeDuration: v)),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              value: _settings!.tradeDurationUnit,
-              decoration: const InputDecoration(labelText: 'Unit'),
-              items: _durationUnits
-                  .map((u) => DropdownMenuItem(
-                        value: u['value'] as String,
-                        child: Text(u['label'] as String),
-                      ))
-                  .toList(),
-              onChanged: (v) => setState(
-                  () => _settings = _settings!.copyWith(tradeDurationUnit: v)),
-            ),
-          ),
-        ]),
 
         const SizedBox(height: 32),
 

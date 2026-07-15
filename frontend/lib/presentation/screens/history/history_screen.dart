@@ -292,7 +292,7 @@ class _TradeHistoryCard extends StatelessWidget {
   const _TradeHistoryCard({required this.trade});
 
   Color get _directionColor =>
-      trade.contractType == 'CALL' ? AppColors.buyColor : AppColors.sellColor;
+      trade.isBuy ? AppColors.buyColor : AppColors.sellColor;
 
   Color get _resultColor {
     if (trade.status == 'open') return AppColors.info;
@@ -304,8 +304,7 @@ class _TradeHistoryCard extends StatelessWidget {
     return (trade.isWin ?? false) ? 'WIN' : 'LOSS';
   }
 
-  String get _directionLabel =>
-      trade.contractType == 'CALL' ? '▲ BUY' : '▼ SELL';
+  String get _directionLabel => trade.isBuy ? '▲ BUY' : '▼ SELL';
 
   @override
   Widget build(BuildContext context) {
@@ -412,14 +411,14 @@ class _TradeHistoryCard extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: 6),
-                // Stake and profit on same row
+                // Lot size and profit on same row
                 Row(
                   children: [
                     Expanded(
                       child: _DetailRow(
-                        icon: Icons.attach_money,
-                        label: 'Stake',
-                        value: Fmt.money(trade.stake),
+                        icon: Icons.scale,
+                        label: 'Lot Size',
+                        value: trade.lotSize.toStringAsFixed(2),
                       ),
                     ),
                     Expanded(

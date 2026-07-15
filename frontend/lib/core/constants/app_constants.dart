@@ -79,17 +79,11 @@ class AppConstants {
   // Default bot symbol
   static const String defaultBotSymbol = 'R_100';
 
-  // ── Contract types ─────────────────────────────────────────────────────────
-  static const List<String> contractTypes = ['CALL', 'PUT'];
+  // ── Contract types (EA-style Multiplier positions) ─────────────────────────
+  static const List<String> contractTypes = ['MULTUP', 'MULTDOWN'];
 
-  // ── Duration units ─────────────────────────────────────────────────────────
-  static const List<Map<String, dynamic>> durationUnits = [
-    {'label': 'Ticks',   'value': 't'},
-    {'label': 'Seconds', 'value': 's'},
-    {'label': 'Minutes', 'value': 'm'},
-    {'label': 'Hours',   'value': 'h'},
-    {'label': 'Days',    'value': 'd'},
-  ];
+  // ── Multiplier (leverage) used for all bot/manual trades ───────────────────
+  static const int defaultMultiplier = 100;
   static const Duration dashboardRefreshInterval = Duration(seconds: 10);
 
   // ── Pagination ────────────────────────────────────────────────────────────

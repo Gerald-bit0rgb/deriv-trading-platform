@@ -22,10 +22,8 @@ class TradingScreen extends ConsumerStatefulWidget {
 class _TradingScreenState extends ConsumerState<TradingScreen> {
   final _formKey = GlobalKey<FormState>();
   String _symbol = AppConstants.popularSymbols.first;
-  String _contractType = 'CALL';
-  double _stake = 1.0;
-  int _duration = 5;
-  String _durationUnit = 't';
+  String _contractType = 'MULTUP';
+  double _lotSize = 0.01;
   bool _isSubmitting = false;
 
   Future<void> _placeTrade() async {
@@ -35,9 +33,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
       await ref.read(tradingServiceProvider).placeTrade(
             symbol: _symbol,
             contractType: _contractType,
-            stake: _stake,
-            duration: _duration,
-            durationUnit: _durationUnit,
+            lotSize: _lotSize,
           );
       ref.invalidate(openTradesProvider);
       if (mounted) {
@@ -114,7 +110,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
                     Row(
                       children: AppConstants.contractTypes.map((type) {
                         final selected = _contractType == type;
-                        final color = type == 'CALL' ? AppColors.buyColor : AppColors.sellColor;
+                        final color = type == 'MULTUP' ? AppColors.buyColor : AppColors.sellColor;
                         return Expanded(
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -129,7 +125,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
                                 ),
                                 child: Center(
                                   child: Text(
-                                    type == 'CALL' ? '▲ CALL (Rise)' : '▼ PUT (Fall)',
+                                    type == 'MULTUP' ? '▲ BUY (Long)' : '▼ SELL (Short)',
                                     style: TextStyle(
                                       color: selected ? Colors.white : color,
                                       fontWeight: FontWeight.w700,
@@ -144,56 +140,20 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Stake
+                    // Lot size
                     TextFormField(
-                      initialValue: _stake.toString(),
+                      initialValue: _lotSize.toString(),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
-                        labelText: 'Stake (USD)',
-                        prefixIcon: Icon(Icons.attach_money),
+                        labelText: 'Lot Size',
+                        prefixIcon: Icon(Icons.scale),
                       ),
-                      onChanged: (v) => _stake = double.tryParse(v) ?? 1.0,
+                      onChanged: (v) => _lotSize = double.tryParse(v) ?? 0.01,
                       validator: (v) {
                         final n = double.tryParse(v ?? '');
-                        if (n == null || n <= 0) return 'Enter a valid stake';
+                        if (n == null || n <= 0) return 'Enter a valid lot size';
                         return null;
                       },
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Duration
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: TextFormField(
-                            initialValue: _duration.toString(),
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(labelText: 'Duration'),
-                            onChanged: (v) => _duration = int.tryParse(v) ?? 5,
-                            validator: (v) {
-                              final n = int.tryParse(v ?? '');
-                              if (n == null || n <= 0) return 'Enter duration';
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          flex: 3,
-                          child: DropdownButtonFormField<String>(
-                            value: _durationUnit,
-                            decoration: const InputDecoration(labelText: 'Unit'),
-                            items: AppConstants.durationUnits
-                                .map((u) => DropdownMenuItem(
-                                      value: u['value'] as String,
-                                      child: Text(u['label'] as String),
-                                    ))
-                                .toList(),
-                            onChanged: (v) => setState(() => _durationUnit = v!),
-                          ),
-                        ),
-                      ],
                     ),
                     const SizedBox(height: 20),
 
@@ -209,7 +169,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
                               ),
                             )
                           : Text(
-                              '${_contractType == 'CALL' ? '▲ BUY CALL' : '▼ BUY PUT'} — Stake \$$_stake',
+                              '${_contractType == 'MULTUP' ? '▲ BUY' : '▼ SELL'} — $_lotSize lots',
                             ),
                     ),
                   ],

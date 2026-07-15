@@ -36,17 +36,13 @@ class AiService {
 
   Future<Map<String, dynamic>> autoTrade({
     required String symbol,
-    required double stake,
-    required int duration,
-    required String durationUnit,
+    required double lotSize,
     int granularity = 60,
   }) async {
     final r = await _dio.post(
       '/ai/auto-trade/$symbol',
       queryParameters: {
-        'stake': stake,
-        'duration': duration,
-        'duration_unit': durationUnit,
+        'lot_size': lotSize,
         'granularity': granularity,
       },
     );

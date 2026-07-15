@@ -56,17 +56,13 @@ class TradingService {
   // ── Trades ─────────────────────────────────────────────────────────────────
   Future<TradeModel> placeTrade({
     required String symbol,
-    required String contractType,
-    required double stake,
-    required int duration,
-    required String durationUnit,
+    required String contractType, // MULTUP | MULTDOWN
+    required double lotSize,
   }) async {
     final r = await _dio.post('/trading/trade', data: {
       'symbol': symbol,
       'contract_type': contractType,
-      'stake': stake,
-      'duration': duration,
-      'duration_unit': durationUnit,
+      'lot_size': lotSize,
     });
     return TradeModel.fromJson(r.data as Map<String, dynamic>);
   }

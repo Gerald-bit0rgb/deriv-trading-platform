@@ -1,16 +1,15 @@
 // Simple trade model — no code generation needed
+// Updated for lot-based EA-style trading (matches backend TradeResponse)
 class TradeModel {
   final int id;
   final String? contractId;
   final String symbol;
-  final String contractType;
-  final double stake;
+  final String contractType; // MULTUP | MULTDOWN
+  final double lotSize;
   final double? payout;
   final double? profit;
   final double? entryPrice;
   final double? exitPrice;
-  final double? takeProfit;
-  final double? stopLoss;
   final String status;
   final bool? isWin;
   final String? aiSignal;
@@ -25,13 +24,11 @@ class TradeModel {
     this.contractId,
     required this.symbol,
     required this.contractType,
-    required this.stake,
+    required this.lotSize,
     this.payout,
     this.profit,
     this.entryPrice,
     this.exitPrice,
-    this.takeProfit,
-    this.stopLoss,
     this.status = 'open',
     this.isWin,
     this.aiSignal,
@@ -48,13 +45,11 @@ class TradeModel {
       contractId: json['contract_id'] as String?,
       symbol: json['symbol'] as String? ?? '',
       contractType: json['contract_type'] as String? ?? '',
-      stake: (json['stake'] as num?)?.toDouble() ?? 0.0,
+      lotSize: (json['lot_size'] as num?)?.toDouble() ?? 0.0,
       payout: (json['payout'] as num?)?.toDouble(),
       profit: (json['profit'] as num?)?.toDouble(),
       entryPrice: (json['entry_price'] as num?)?.toDouble(),
       exitPrice: (json['exit_price'] as num?)?.toDouble(),
-      takeProfit: (json['take_profit'] as num?)?.toDouble(),
-      stopLoss: (json['stop_loss'] as num?)?.toDouble(),
       status: json['status'] as String? ?? 'open',
       isWin: json['is_win'] as bool?,
       aiSignal: json['ai_signal'] as String?,
@@ -69,6 +64,9 @@ class TradeModel {
           : null,
     );
   }
+
+  /// True for a long/buy position (MULTUP).
+  bool get isBuy => contractType == 'MULTUP';
 }
 
 class TradeSummary {

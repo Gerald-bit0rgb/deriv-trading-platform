@@ -18,7 +18,7 @@ class TradeCard extends StatelessWidget {
   }
 
   Color get _contractColor =>
-      trade.contractType == 'CALL' ? AppColors.buyColor : AppColors.sellColor;
+      trade.isBuy ? AppColors.buyColor : AppColors.sellColor;
 
   @override
   Widget build(BuildContext context) {
@@ -89,7 +89,7 @@ class TradeCard extends StatelessWidget {
           // ── Stats row ─────────────────────────────────────────────────────
           Row(
             children: [
-              _stat('Stake', Fmt.money(trade.stake)),
+              _stat('Lot Size', trade.lotSize.toStringAsFixed(2)),
               _stat('Payout', Fmt.money(trade.payout)),
               _stat(
                 'P/L',

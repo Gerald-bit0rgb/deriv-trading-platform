@@ -165,20 +165,20 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
 
               const _SectionTitle('Position Sizing'),
               _SliderTile(
-                label: 'Default Stake',
-                value: _settings!.defaultStake,
-                min: 0.35, max: 100, divisions: 200,
-                format: (v) => '\$${v.toStringAsFixed(2)}',
+                label: 'Default Lot Size',
+                value: _settings!.defaultLotSize,
+                min: 0.01, max: 1.0, divisions: 99,
+                format: (v) => v.toStringAsFixed(2),
                 onChanged: (v) => setState(() =>
-                    _settings = _settings!.copyWith(defaultStake: v)),
+                    _settings = _settings!.copyWith(defaultLotSize: v)),
               ),
               _SliderTile(
-                label: 'Max Stake',
-                value: _settings!.maxStake,
-                min: 1, max: 1000, divisions: 999,
-                format: (v) => '\$${v.toStringAsFixed(0)}',
+                label: 'Max Lot Size',
+                value: _settings!.maxLotSize,
+                min: 0.01, max: 10.0, divisions: 999,
+                format: (v) => v.toStringAsFixed(2),
                 onChanged: (v) => setState(() =>
-                    _settings = _settings!.copyWith(maxStake: v)),
+                    _settings = _settings!.copyWith(maxLotSize: v)),
               ),
 
               const _SectionTitle('Daily Limits'),
@@ -191,6 +191,14 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
                     _settings = _settings!.copyWith(maxDailyLoss: v)),
               ),
               _SliderTile(
+                label: 'Max Daily Trades',
+                value: _settings!.maxDailyTrades.toDouble(),
+                min: 1, max: 200, divisions: 199,
+                format: (v) => '${v.toInt()} trades',
+                onChanged: (v) => setState(() =>
+                    _settings = _settings!.copyWith(maxDailyTrades: v.toInt())),
+              ),
+              _SliderTile(
                 label: 'Daily Profit Target',
                 value: _settings!.dailyProfitTarget,
                 min: 1, max: 1000, divisions: 999,
@@ -199,14 +207,46 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
                     _settings = _settings!.copyWith(dailyProfitTarget: v)),
               ),
 
-              const _SectionTitle('Concurrent Positions'),
-              _SliderTile(
-                label: 'Max Open Trades',
-                value: _settings!.maxOpenTrades.toDouble(),
-                min: 1, max: 20, divisions: 19,
-                format: (v) => '${v.toInt()} trades',
+              const _SectionTitle('Trailing Stop'),
+              _SwitchTile(
+                title: 'Trailing Stop Enabled',
+                subtitle: 'Locks in profit as a trade moves in your favor — the EA-style exit that works alongside crossback',
+                value: _settings!.trailingStopEnabled,
                 onChanged: (v) => setState(() =>
-                    _settings = _settings!.copyWith(maxOpenTrades: v.toInt())),
+                    _settings = _settings!.copyWith(trailingStopEnabled: v)),
+              ),
+              if (_settings!.trailingStopEnabled)
+                _SliderTile(
+                  label: 'Trailing Stop Distance',
+                  value: _settings!.trailingStopDistance,
+                  min: 0.1, max: 20, divisions: 199,
+                  format: (v) => '\$${v.toStringAsFixed(2)}',
+                  onChanged: (v) => setState(() =>
+                      _settings = _settings!.copyWith(trailingStopDistance: v)),
+                ),
+
+              const _SectionTitle('Concurrent Positions'),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.info.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.info.withOpacity(0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: AppColors.info, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'The bot scans and can hold one open position per symbol '
+                        'in your Watchlist — add or remove symbols there to '
+                        'control how many trades run at once.',
+                        style: TextStyle(fontSize: 12, color: AppColors.info),
+                      ),
+                    ),
+                  ],
+                ),
               ),
 
               const _SectionTitle('Drawdown Protection'),
