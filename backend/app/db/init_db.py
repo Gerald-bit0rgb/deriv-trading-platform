@@ -65,6 +65,22 @@ async def init_db() -> None:
             ALTER TABLE strategy_settings
             ADD COLUMN IF NOT EXISTS trend_applied_price VARCHAR(10) DEFAULT 'CLOSE'
             """,
+            # ── Trades: lot-based trading (was stake/duration) ───────────────────
+            # DEFAULT is required here — existing rows need a value backfilled
+            # since lot_size is NOT NULL on the model.
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS lot_size FLOAT NOT NULL DEFAULT 0.01
+            """,
+            # ── Risk settings: lot-based trading (was stake-based) ───────────────
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS default_lot_size FLOAT DEFAULT 0.01
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS max_lot_size FLOAT DEFAULT 1.0
+            """,
         ]
         for sql in migrations:
             try:
