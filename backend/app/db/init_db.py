@@ -65,14 +65,132 @@ async def init_db() -> None:
             ALTER TABLE strategy_settings
             ADD COLUMN IF NOT EXISTS trend_applied_price VARCHAR(10) DEFAULT 'CLOSE'
             """,
-            # ── Trades: lot-based trading (was stake/duration) ───────────────────
-            # DEFAULT is required here — existing rows need a value backfilled
-            # since lot_size is NOT NULL on the model.
+            # ── 1M entry-confirmation columns (EMA3/BB18/MACD/RSI) ────────────────
+            # These were never migrated when the strategy moved off the original
+            # MA Bias Basket schema — this is the actual root cause of
+            # "column strategy_settings.ema_fast_period does not exist".
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS entry_timeframe INTEGER DEFAULT 60
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS ema_fast_period INTEGER DEFAULT 3
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS ema_applied_price VARCHAR(10) DEFAULT 'CLOSE'
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS bb_period INTEGER DEFAULT 18
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS bb_std_dev FLOAT DEFAULT 2.0
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS bb_method VARCHAR(10) DEFAULT 'SMA'
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS macd_fast INTEGER DEFAULT 12
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS macd_slow INTEGER DEFAULT 26
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS macd_signal INTEGER DEFAULT 9
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS rsi_period INTEGER DEFAULT 14
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS rsi_overbought FLOAT DEFAULT 70.0
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS rsi_oversold FLOAT DEFAULT 30.0
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS exit_on_crossback_enabled BOOLEAN DEFAULT TRUE
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()
+            """,
+            # ── Trades: full defensive coverage (every non-key column) ───────────
             """
             ALTER TABLE trades
             ADD COLUMN IF NOT EXISTS lot_size FLOAT NOT NULL DEFAULT 0.01
             """,
-            # ── Risk settings: lot-based trading (was stake-based) ───────────────
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS contract_id VARCHAR(100)
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS symbol VARCHAR(50) NOT NULL DEFAULT 'R_100'
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS contract_type VARCHAR(50) NOT NULL DEFAULT 'MULTUP'
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS payout FLOAT
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS profit FLOAT
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS entry_price FLOAT
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS exit_price FLOAT
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'open'
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS is_win BOOLEAN
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS ai_signal VARCHAR(10)
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS ai_confidence FLOAT
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS ai_reason TEXT
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'manual'
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ DEFAULT now()
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ
+            """,
+            # ── Risk settings: full defensive coverage ────────────────────────────
             """
             ALTER TABLE risk_settings
             ADD COLUMN IF NOT EXISTS default_lot_size FLOAT DEFAULT 0.01
@@ -80,6 +198,112 @@ async def init_db() -> None:
             """
             ALTER TABLE risk_settings
             ADD COLUMN IF NOT EXISTS max_lot_size FLOAT DEFAULT 1.0
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS max_daily_loss FLOAT DEFAULT 50.0
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS max_daily_trades INTEGER DEFAULT 100
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS daily_profit_target FLOAT DEFAULT 200.0
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS max_drawdown_pct FLOAT DEFAULT 20.0
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS trailing_stop_enabled BOOLEAN DEFAULT TRUE
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS trailing_stop_distance FLOAT DEFAULT 2.0
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS emergency_stop BOOLEAN DEFAULT FALSE
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS trading_enabled BOOLEAN DEFAULT TRUE
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS min_ai_confidence FLOAT DEFAULT 0.65
+            """,
+            """
+            ALTER TABLE risk_settings
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()
+            """,
+            # ── Users: defensive coverage for optional columns ────────────────────
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)
+            """,
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS deriv_api_token TEXT
+            """,
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS deriv_account_id VARCHAR(100)
+            """,
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE
+            """,
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS fcm_token TEXT
+            """,
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()
+            """,
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()
+            """,
+            # ── Bot sessions / notifications / watchlist: defensive coverage ──────
+            """
+            ALTER TABLE bot_sessions
+            ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE
+            """,
+            """
+            ALTER TABLE bot_sessions
+            ADD COLUMN IF NOT EXISTS symbol VARCHAR(20) DEFAULT 'R_100'
+            """,
+            """
+            ALTER TABLE bot_sessions
+            ADD COLUMN IF NOT EXISTS account_type VARCHAR(10) DEFAULT 'demo'
+            """,
+            """
+            ALTER TABLE bot_sessions
+            ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ
+            """,
+            """
+            ALTER TABLE bot_sessions
+            ADD COLUMN IF NOT EXISTS stopped_at TIMESTAMPTZ
+            """,
+            """
+            ALTER TABLE notifications
+            ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE
+            """,
+            """
+            ALTER TABLE notifications
+            ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ DEFAULT now()
+            """,
+            """
+            ALTER TABLE watchlist
+            ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE
+            """,
+            """
+            ALTER TABLE watchlist
+            ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ DEFAULT now()
             """,
         ]
         for sql in migrations:
