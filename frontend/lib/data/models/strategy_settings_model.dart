@@ -1,9 +1,18 @@
 // Strategy Settings model — 1-Minute Microtrading strategy
-// Indicators: EMA 3, Bollinger Bands 18, MACD (9, 12, 26), RSI 14
+// Trend: higher-timeframe MA filter (e.g. 4H EMA 5/13) gates every entry
+// Entry: EMA 3, Bollinger Bands 18, MACD (9, 12, 26), RSI 14
 // Exit: Crossback only (EMA crosses back through BB middle) — EA-style, no duration
 class StrategySettingsModel {
   final int id;
   final int userId;
+
+  // ── Trend Direction Filter (e.g. 4H EMA 5 vs EMA 13) ────────────────────────
+  final bool requireTrendAlignment;
+  final int trendTimeframe;      // seconds — 14400 = 4H
+  final int trendFastPeriod;
+  final int trendSlowPeriod;
+  final String trendMaMethod;    // EMA | SMA | WMA | SMMA
+  final String trendAppliedPrice; // CLOSE | OPEN | HIGH | LOW | MEDIAN | TYPICAL | WEIGHTED
 
   // Entry timeframe (seconds) — always 60 (1M) for this strategy
   final int entryTimeframe;
@@ -33,6 +42,12 @@ class StrategySettingsModel {
   const StrategySettingsModel({
     this.id = 0,
     this.userId = 0,
+    this.requireTrendAlignment = true,
+    this.trendTimeframe = 14400,
+    this.trendFastPeriod = 5,
+    this.trendSlowPeriod = 13,
+    this.trendMaMethod = 'EMA',
+    this.trendAppliedPrice = 'CLOSE',
     this.entryTimeframe = 60,
     this.emaFastPeriod = 3,
     this.emaAppliedPrice = 'CLOSE',
@@ -52,6 +67,12 @@ class StrategySettingsModel {
     return StrategySettingsModel(
       id: json['id'] as int? ?? 0,
       userId: json['user_id'] as int? ?? 0,
+      requireTrendAlignment: json['require_trend_alignment'] as bool? ?? true,
+      trendTimeframe: json['trend_timeframe'] as int? ?? 14400,
+      trendFastPeriod: json['trend_fast_period'] as int? ?? 5,
+      trendSlowPeriod: json['trend_slow_period'] as int? ?? 13,
+      trendMaMethod: json['trend_ma_method'] as String? ?? 'EMA',
+      trendAppliedPrice: json['trend_applied_price'] as String? ?? 'CLOSE',
       entryTimeframe: json['entry_timeframe'] as int? ?? 60,
       emaFastPeriod: json['ema_fast_period'] as int? ?? 3,
       emaAppliedPrice: json['ema_applied_price'] as String? ?? 'CLOSE',
@@ -69,6 +90,12 @@ class StrategySettingsModel {
   }
 
   Map<String, dynamic> toJson() => {
+        'require_trend_alignment': requireTrendAlignment,
+        'trend_timeframe': trendTimeframe,
+        'trend_fast_period': trendFastPeriod,
+        'trend_slow_period': trendSlowPeriod,
+        'trend_ma_method': trendMaMethod,
+        'trend_applied_price': trendAppliedPrice,
         'entry_timeframe': entryTimeframe,
         'ema_fast_period': emaFastPeriod,
         'ema_applied_price': emaAppliedPrice,
@@ -85,6 +112,12 @@ class StrategySettingsModel {
       };
 
   StrategySettingsModel copyWith({
+    bool? requireTrendAlignment,
+    int? trendTimeframe,
+    int? trendFastPeriod,
+    int? trendSlowPeriod,
+    String? trendMaMethod,
+    String? trendAppliedPrice,
     int? entryTimeframe,
     int? emaFastPeriod,
     String? emaAppliedPrice,
@@ -102,6 +135,12 @@ class StrategySettingsModel {
     return StrategySettingsModel(
       id: id,
       userId: userId,
+      requireTrendAlignment: requireTrendAlignment ?? this.requireTrendAlignment,
+      trendTimeframe: trendTimeframe ?? this.trendTimeframe,
+      trendFastPeriod: trendFastPeriod ?? this.trendFastPeriod,
+      trendSlowPeriod: trendSlowPeriod ?? this.trendSlowPeriod,
+      trendMaMethod: trendMaMethod ?? this.trendMaMethod,
+      trendAppliedPrice: trendAppliedPrice ?? this.trendAppliedPrice,
       entryTimeframe: entryTimeframe ?? this.entryTimeframe,
       emaFastPeriod: emaFastPeriod ?? this.emaFastPeriod,
       emaAppliedPrice: emaAppliedPrice ?? this.emaAppliedPrice,
