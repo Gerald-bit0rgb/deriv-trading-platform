@@ -43,7 +43,6 @@ class TradeCard extends StatelessWidget {
         Text(
           value,
           style: const TextStyle(
-            color: AppColors.textDefault,
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
@@ -54,11 +53,13 @@ class TradeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surfaceSecondary,
+        color: isDark ? AppColors.darkCard : AppColors.lightCard,
         borderRadius: BorderRadius.circular(12),
         border: Border(
           left: BorderSide(color: _directionColor, width: 3),
