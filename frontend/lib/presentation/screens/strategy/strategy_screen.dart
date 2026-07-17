@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../data/models/strategy_settings_model.dart';
 import '../../../data/services/strategy_service.dart';
 
@@ -73,7 +74,7 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
       setState(() => _isSaving = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Error: $e'),
+          content: Text(Fmt.apiError(e)),
           backgroundColor: AppColors.danger,
         ));
       }
@@ -120,6 +121,12 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
       }
     } catch (e) {
       setState(() => _isSaving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(Fmt.apiError(e)),
+          backgroundColor: AppColors.danger,
+        ));
+      }
     }
   }
 
@@ -413,16 +420,16 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
 
         // ── EXIT SECTION ──────────────────────────────────────────────────
         _SectionHeader(
-          title: 'EXIT — CROSSBACK',
+          title: 'EXIT SIGNAL',
           subtitle: 'EA-style exit — no fixed duration',
           color: AppColors.primary,
         ),
         SwitchListTile(
-          title: const Text('Enable Crossback Exit',
+          title: const Text('Enable Exit Signal',
               style: TextStyle(fontWeight: FontWeight.w600)),
           subtitle: const Text(
-            'BUY closes when EMA crosses BELOW BB middle.\n'
-            'SELL closes when EMA crosses ABOVE BB middle.\n'
+            'BUY closes when EMA is below BB middle.\n'
+            'SELL closes when EMA is above BB middle.\n'
             'Combine with Trailing Stop (Risk Settings) to lock in profit sooner.',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
@@ -446,7 +453,7 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
               style: TextStyle(fontWeight: FontWeight.w600)),
           subtitle: const Text(
             'At entry, SL/TP are set at entry price ± (ATR × multiplier).\n'
-            'Works alongside crossback and trailing stop — whichever '
+            'Works alongside the exit signal and trailing stop — whichever '
             'condition is met first closes the trade.',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),

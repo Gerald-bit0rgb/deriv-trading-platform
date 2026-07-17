@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../data/models/trade_model.dart';
 import '../../../data/services/trading_service.dart';
 import '../../widgets/trade/trade_card.dart';
@@ -48,7 +49,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text(Fmt.apiError(e)),
             backgroundColor: AppColors.danger,
           ),
         );
@@ -66,7 +67,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Close failed: ${e.toString()}'),
+            content: Text(Fmt.apiError(e)),
             backgroundColor: AppColors.danger,
           ),
         );

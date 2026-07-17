@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../data/models/risk_settings_model.dart';
 import '../../../data/services/risk_service.dart';
 
@@ -40,7 +41,7 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
       setState(() => _isSaving = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.danger),
+          SnackBar(content: Text(Fmt.apiError(e)), backgroundColor: AppColors.danger),
         );
       }
     }
@@ -210,7 +211,7 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
               const _SectionTitle('Trailing Stop'),
               _SwitchTile(
                 title: 'Trailing Stop Enabled',
-                subtitle: 'Locks in profit as a trade moves in your favor — the EA-style exit that works alongside crossback',
+                subtitle: 'Locks in profit as a trade moves in your favor — the EA-style exit that works alongside the exit signal',
                 value: _settings!.trailingStopEnabled,
                 onChanged: (v) => setState(() =>
                     _settings = _settings!.copyWith(trailingStopEnabled: v)),

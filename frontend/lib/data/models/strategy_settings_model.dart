@@ -1,7 +1,7 @@
 // Strategy Settings model — 1-Minute Microtrading strategy
 // Trend: higher-timeframe MA filter (e.g. 4H EMA 5/13) gates every entry
 // Entry: EMA 3, Bollinger Bands 18, MACD (9, 12, 26), RSI 14
-// Exit: Crossback (EMA crosses back through BB middle) + optional ATR SL/TP
+// Exit: Position-based (EMA above/below BB middle, opposite of entry) + optional ATR SL/TP
 class StrategySettingsModel {
   final int id;
   final int userId;
@@ -36,7 +36,7 @@ class StrategySettingsModel {
   final double rsiOverbought;
   final double rsiOversold;
 
-  // Exit signals — crossback only, no duration-based exits
+  // Exit signals — position-based only, no duration-based exits
   final bool exitOnCrossbackEnabled;
 
   // ATR-based Stop Loss / Take Profit (optional, off by default)

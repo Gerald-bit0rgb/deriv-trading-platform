@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 
 /// Shared formatting helpers used throughout the app.
@@ -26,4 +27,21 @@ class Fmt {
   }
 
   static String confidence(double c) => '${(c * 100).toStringAsFixed(0)}%';
+
+  /// Extracts the real backend error message from an exception.
+  /// FastAPI errors come back as {"detail": "..."} — this pulls that out
+  /// instead of showing the raw DioException stack dump to the user.
+  static String apiError(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map && data['detail'] != null) {
+        return data['detail'].toString();
+      }
+      if (e.response?.statusCode != null) {
+        return 'Server error (${e.response!.statusCode}). Please try again.';
+      }
+      return 'Network error. Check your connection and try again.';
+    }
+    return e.toString();
+  }
 }
