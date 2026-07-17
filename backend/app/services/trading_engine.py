@@ -450,6 +450,71 @@ async def _monitor_loop(session: UserSession) -> None:
     logger.info("monitor.stopped", user_id=session.user_id)
 
 
+async def _recover_closed_contract(
+    session: UserSession, db: AsyncSession, trade: Trade
+) -> None:
+    """
+    Handles a contract Deriv no longer lists as "open" at all (fully closed
+    and dropped from proposal_open_contract tracking, not just sold/stopped-out
+    with a status we can read directly). Looks it up in the account's recent
+    profit_table to recover the real exit price and profit; if it can't be
+    found there either (very old, or a data gap on Deriv's side), the trade
+    is still marked closed with an unknown outcome — leaving it "open"
+    forever would just mean it gets retried and re-fails every monitor
+    cycle indefinitely.
+    """
+    try:
+        table = await session.client.get_profit_table(limit=50)
+        transactions = table.get("transactions", [])
+        match = next(
+            (t for t in transactions if str(t.get("contract_id")) == str(trade.contract_id)),
+            None,
+        )
+        if match:
+            profit = float(match.get("sell_price", 0)) - float(match.get("buy_price", 0))
+            await trade_crud.close_trade(
+                db,
+                trade=trade,
+                exit_price=float(match.get("sell_price", 0)),
+                profit=profit,
+                payout=float(match.get("sell_price", 0)),
+            )
+            logger.info(
+                "trade.auto_closed_via_profit_table",
+                trade_id=trade.id,
+                profit=profit,
+            )
+        else:
+            # Couldn't recover real numbers — close it anyway so it stops
+            # being retried forever. Flagged clearly in the log and the
+            # trade's ai_reason field so it's easy to find and check
+            # manually against the Deriv statement if it matters.
+            await trade_crud.close_trade(
+                db, trade=trade, exit_price=0, profit=0, payout=0,
+            )
+            trade.ai_reason = (
+                (trade.ai_reason or "") +
+                " [Closed automatically — Deriv no longer tracked this "
+                "contract and it wasn't found in recent history. Check "
+                "your Deriv statement for the real outcome.]"
+            ).strip()
+            logger.warning(
+                "trade.auto_closed_unknown_outcome",
+                trade_id=trade.id,
+                contract_id=trade.contract_id,
+            )
+        await _notify_trade_close_by_id(
+            session.user_id, session.fcm_token, trade, db
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(
+            "monitor.recover_closed_contract_failed",
+            trade_id=trade.id,
+            error=str(e),
+        )
+
+
 async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
     """
     Check each open trade, in priority order:
@@ -660,9 +725,18 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                     profit=profit,
                 )
         except Exception as e:
-            logger.warning(
-                "monitor.check_failed", trade_id=trade.id, error=str(e)
-            )
+            error_msg = str(e)
+            # Deriv no longer tracks this contract as "open" at all (fully
+            # closed/expired and dropped from proposal_open_contract) — the
+            # direct lookup above will never succeed for it. Without this
+            # fallback the trade would stay "open" in our DB forever and
+            # get retried, and re-fail, every single monitor cycle.
+            if "not found among your open positions" in error_msg.lower():
+                await _recover_closed_contract(session, db, trade)
+            else:
+                logger.warning(
+                    "monitor.check_failed", trade_id=trade.id, error=error_msg
+                )
 
 
 # ────────────────────────────────────────────────────────────────────────────
