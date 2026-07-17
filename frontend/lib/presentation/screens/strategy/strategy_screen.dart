@@ -264,9 +264,16 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
         // ── ENTRY CONFIRMATION SECTION ───────────────────────────────────────
         _SectionHeader(
           title: 'ENTRY CONFIRMATION',
-          subtitle: '1-minute microtrading signal — EMA / Bollinger Bands / MACD / RSI',
+          subtitle: 'Microtrading signal — EMA / Bollinger Bands / MACD / RSI',
           color: AppColors.accent,
         ),
+        _TfDropdown(
+          label: 'Entry Timeframe',
+          value: _settings!.entryTimeframe,
+          onChanged: (v) =>
+              setState(() => _settings = _settings!.copyWith(entryTimeframe: v)),
+        ),
+        const SizedBox(height: 16),
 
         _SubHeader(title: 'EMA (fast entry line)'),
         Row(children: [
@@ -425,6 +432,61 @@ class _StrategyScreenState extends ConsumerState<StrategyScreen> {
           activeColor: AppColors.primary,
           contentPadding: EdgeInsets.zero,
         ),
+
+        const SizedBox(height: 24),
+
+        // ── ATR STOP LOSS / TAKE PROFIT SECTION ──────────────────────────────
+        _SectionHeader(
+          title: 'ATR STOP LOSS / TAKE PROFIT',
+          subtitle: 'Optional — sets price-based exits from entry, sized to current volatility',
+          color: AppColors.accent,
+        ),
+        SwitchListTile(
+          title: const Text('Enable ATR Stop Loss / Take Profit',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text(
+            'At entry, SL/TP are set at entry price ± (ATR × multiplier).\n'
+            'Works alongside crossback and trailing stop — whichever '
+            'condition is met first closes the trade.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+          value: _settings!.useAtrSlTp,
+          onChanged: (v) => setState(
+              () => _settings = _settings!.copyWith(useAtrSlTp: v)),
+          activeColor: AppColors.accent,
+          contentPadding: EdgeInsets.zero,
+        ),
+        if (_settings!.useAtrSlTp) ...[
+          const SizedBox(height: 8),
+          _IntField(
+            label: 'ATR Period',
+            value: _settings!.atrPeriod,
+            onChanged: (v) =>
+                setState(() => _settings = _settings!.copyWith(atrPeriod: v)),
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: _DoubleField(
+                label: 'Stop Loss Multiplier',
+                hint: 'e.g. 1.5',
+                value: _settings!.atrSlMultiplier,
+                onChanged: (v) => setState(() =>
+                    _settings = _settings!.copyWith(atrSlMultiplier: v)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _DoubleField(
+                label: 'Take Profit Multiplier',
+                hint: 'e.g. 2.0',
+                value: _settings!.atrTpMultiplier,
+                onChanged: (v) => setState(() =>
+                    _settings = _settings!.copyWith(atrTpMultiplier: v)),
+              ),
+            ),
+          ]),
+        ],
 
         const SizedBox(height: 32),
 

@@ -151,6 +151,33 @@ class TradeCard extends StatelessWidget {
             ],
           ),
 
+          // ATR Stop Loss / Take Profit (if set)
+          if (trade.stopLossPrice != null || trade.takeProfitPrice != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (trade.stopLossPrice != null) ...[
+                  const Icon(Icons.shield_outlined, size: 13, color: AppColors.danger),
+                  const SizedBox(width: 4),
+                  Text(
+                    'SL ${trade.stopLossPrice!.toStringAsFixed(5)}',
+                    style: const TextStyle(color: AppColors.danger, fontSize: 11),
+                  ),
+                ],
+                if (trade.stopLossPrice != null && trade.takeProfitPrice != null)
+                  const SizedBox(width: 12),
+                if (trade.takeProfitPrice != null) ...[
+                  const Icon(Icons.flag_outlined, size: 13, color: AppColors.success),
+                  const SizedBox(width: 4),
+                  Text(
+                    'TP ${trade.takeProfitPrice!.toStringAsFixed(5)}',
+                    style: const TextStyle(color: AppColors.success, fontSize: 11),
+                  ),
+                ],
+              ],
+            ),
+          ],
+
           // AI Signal (if available)
           if (trade.aiSignal != null) ...[
             const SizedBox(height: 12),

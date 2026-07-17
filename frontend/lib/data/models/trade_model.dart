@@ -10,6 +10,8 @@ class TradeModel {
   final double? profit;
   final double? entryPrice;
   final double? exitPrice;
+  final double? stopLossPrice;
+  final double? takeProfitPrice;
   final String status;
   final bool? isWin;
   final String? aiSignal;
@@ -29,6 +31,8 @@ class TradeModel {
     this.profit,
     this.entryPrice,
     this.exitPrice,
+    this.stopLossPrice,
+    this.takeProfitPrice,
     this.status = 'open',
     this.isWin,
     this.aiSignal,
@@ -50,6 +54,8 @@ class TradeModel {
       profit: (json['profit'] as num?)?.toDouble(),
       entryPrice: (json['entry_price'] as num?)?.toDouble(),
       exitPrice: (json['exit_price'] as num?)?.toDouble(),
+      stopLossPrice: (json['stop_loss_price'] as num?)?.toDouble(),
+      takeProfitPrice: (json['take_profit_price'] as num?)?.toDouble(),
       status: json['status'] as String? ?? 'open',
       isWin: json['is_win'] as bool?,
       aiSignal: json['ai_signal'] as String?,
