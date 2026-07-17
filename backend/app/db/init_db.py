@@ -125,6 +125,31 @@ async def init_db() -> None:
             ALTER TABLE strategy_settings
             ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()
             """,
+            # ── ATR-based Stop Loss / Take Profit (optional feature) ──────────────
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS use_atr_sl_tp BOOLEAN DEFAULT FALSE
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS atr_period INTEGER DEFAULT 14
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS atr_sl_multiplier FLOAT DEFAULT 1.5
+            """,
+            """
+            ALTER TABLE strategy_settings
+            ADD COLUMN IF NOT EXISTS atr_tp_multiplier FLOAT DEFAULT 2.0
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS stop_loss_price FLOAT
+            """,
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS take_profit_price FLOAT
+            """,
             # ── Trades: full defensive coverage (every non-key column) ───────────
             """
             ALTER TABLE trades

@@ -41,6 +41,12 @@ class Trade(Base):
     entry_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # ── ATR-based Stop Loss / Take Profit (price levels, set at entry) ─────────
+    # Null unless strategy_settings.use_atr_sl_tp was enabled when this trade
+    # was opened. Monitored client-side alongside crossback/trailing-stop exits.
+    stop_loss_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    take_profit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     # ── Trade status and result ───────────────────────────────────────────────
     status: Mapped[str] = mapped_column(String(20), default="open", index=True)
     is_win: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)

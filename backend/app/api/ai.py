@@ -5,7 +5,7 @@ GET  /api/v1/ai/signal/{symbol}       — get a trading signal for one symbol
 POST /api/v1/ai/signal/batch          — signals for multiple symbols
 POST /api/v1/ai/auto-trade/{symbol}   — let the AI decide and execute the trade
 """
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +58,7 @@ async def _get_engine(user_id: int, db: AsyncSession) -> AIEngine:
 @router.get("/signal/{symbol}", response_model=AISignalResponse)
 async def get_signal(
     symbol: str,
-    granularity: int = Query(60, description="Candle granularity in seconds"),
+    granularity: Optional[int] = Query(None, description="Candle granularity in seconds — omit to use your saved entry timeframe"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -92,7 +92,7 @@ async def get_signal(
 @router.post("/signal/batch", response_model=List[AISignalResponse])
 async def get_batch_signals(
     symbols: List[str] = Body(..., examples=[["R_100", "R_50", "frxEURUSD"]]),
-    granularity: int = Query(60),
+    granularity: Optional[int] = Query(None),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -127,7 +127,7 @@ async def get_batch_signals(
 async def ai_auto_trade(
     symbol: str,
     lot_size: float = Query(0.01, gt=0, description="Lot size, e.g. 0.01, 0.1, 1.0"),
-    granularity: int = Query(60),
+    granularity: Optional[int] = Query(None),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):

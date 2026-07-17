@@ -330,7 +330,7 @@ async def _analyse_and_trade_symbol(
     # Analyse
     try:
         engine = AIEngine(client=session.client, settings=strat)
-        signal = await engine.analyse(symbol, granularity=60)
+        signal = await engine.analyse(symbol, granularity=None)
         logger.info(
             "strategy.analysis_result",
             user_id=session.user_id,
@@ -465,10 +465,72 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
         return
 
     strat = await get_strategy_settings(db, session.user_id)
+    risk = await get_or_create_risk_settings(db, session.user_id)
 
     for trade in open_trades:
         if not trade.contract_id:
             continue
+
+        # ── Priority 0: ATR-based Stop Loss / Take Profit (hard risk limit) ─
+        if strat.use_atr_sl_tp and session.client and (
+            trade.stop_loss_price is not None or trade.take_profit_price is not None
+        ):
+            try:
+                details = await session.client.get_contract_details(int(trade.contract_id))
+                current_price = details.get("current_spot")
+                if current_price is not None:
+                    current_price = float(current_price)
+                    is_buy = trade.contract_type == "MULTUP"
+                    hit_sl = (
+                        trade.stop_loss_price is not None and (
+                            (is_buy and current_price <= trade.stop_loss_price) or
+                            (not is_buy and current_price >= trade.stop_loss_price)
+                        )
+                    )
+                    hit_tp = (
+                        trade.take_profit_price is not None and (
+                            (is_buy and current_price >= trade.take_profit_price) or
+                            (not is_buy and current_price <= trade.take_profit_price)
+                        )
+                    )
+                    if hit_sl or hit_tp:
+                        reason = "Stop Loss" if hit_sl else "Take Profit"
+                        try:
+                            sell_info = await session.client.sell_contract(
+                                int(trade.contract_id)
+                            )
+                            sold_for = float(sell_info.get("sold_for", 0))
+                            profit = float(sell_info.get("profit", sold_for))
+                            await trade_crud.close_trade(
+                                db,
+                                trade=trade,
+                                exit_price=float(sell_info.get("exit_spot", 0)),
+                                profit=profit,
+                                payout=sold_for,
+                            )
+                            await _notify_trade_close_by_id(
+                                session.user_id, session.fcm_token, trade, db
+                            )
+                            await _send_notif(
+                                session, db, "atr_sl_tp_exit",
+                                f"ATR {reason} Hit",
+                                f"{trade.contract_type} on {trade.symbol} closed | "
+                                f"{reason} | Profit: ${profit:.2f}",
+                            )
+                            await db.commit()
+                            continue
+                        except Exception as e:
+                            logger.warning(
+                                "monitor.atr_sl_tp_sell_failed",
+                                trade_id=trade.id,
+                                error=str(e),
+                            )
+            except Exception as e:
+                logger.warning(
+                    "monitor.atr_sl_tp_check_failed",
+                    trade_id=trade.id,
+                    error=str(e),
+                )
 
         # ── Priority 1: Crossback exit (the strategy's real exit signal) ──
         if strat.exit_on_crossback_enabled and session.client:
@@ -476,7 +538,8 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                 trade_direction = "BUY" if trade.contract_type == "MULTUP" else "SELL"
                 engine = AIEngine(client=session.client, settings=strat)
                 should_exit = await engine.check_exit_signal(
-                    trade.symbol, trade_direction, granularity=60
+                    trade.symbol, trade_direction,
+                    granularity=strat.entry_timeframe,
                 )
                 if should_exit:
                     try:
@@ -514,11 +577,11 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                 )
 
         # ── Priority 2: Trailing Stop ──────────────────────────────────────
-        if strat.trailing_stop_enabled and session.client:
+        if risk.trailing_stop_enabled and session.client:
             try:
                 details = await session.client.get_contract_details(int(trade.contract_id))
                 current_profit = float(details.get("profit", 0))
-                trailing_stop_dist = strat.trailing_stop_distance
+                trailing_stop_dist = risk.trailing_stop_distance
 
                 # If trade is winning and hits trailing stop
                 if current_profit > 0 and current_profit <= trailing_stop_dist:
@@ -652,6 +715,36 @@ async def execute_trade(
         multiplier=DEFAULT_MULTIPLIER,
     )
 
+    entry_price = contract.get("entry_spot")
+    stop_loss_price = None
+    take_profit_price = None
+
+    from app.crud.strategy import get_strategy_settings
+    strat = await get_strategy_settings(db, user.id)
+    if strat.use_atr_sl_tp and entry_price is not None:
+        from app.services.ai_engine import AIEngine
+        engine = AIEngine(client=session.client, settings=strat)
+        atr_value = await engine.get_atr_value(
+            symbol, period=strat.atr_period, granularity=strat.entry_timeframe
+        )
+        if atr_value is not None and atr_value > 0:
+            sl_dist = atr_value * strat.atr_sl_multiplier
+            tp_dist = atr_value * strat.atr_tp_multiplier
+            if contract_type == "MULTUP":
+                stop_loss_price = entry_price - sl_dist
+                take_profit_price = entry_price + tp_dist
+            else:  # MULTDOWN
+                stop_loss_price = entry_price + sl_dist
+                take_profit_price = entry_price - tp_dist
+            logger.info(
+                "trading_engine.atr_sl_tp_set",
+                symbol=symbol,
+                entry_price=entry_price,
+                atr=atr_value,
+                stop_loss_price=stop_loss_price,
+                take_profit_price=take_profit_price,
+            )
+
     trade = await trade_crud.create_trade(
         db,
         user_id=user.id,
@@ -659,8 +752,10 @@ async def execute_trade(
         symbol=symbol,
         contract_type=contract_type,
         lot_size=lot_size,
-        entry_price=contract.get("entry_spot"),
+        entry_price=entry_price,
         payout=contract.get("payout"),
+        stop_loss_price=stop_loss_price,
+        take_profit_price=take_profit_price,
         ai_signal=ai_signal,
         ai_confidence=ai_confidence,
         ai_reason=ai_reason,

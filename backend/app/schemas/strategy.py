@@ -15,8 +15,10 @@ class StrategySettingsUpdate(BaseModel):
     trend_ma_method: str = Field(default="EMA", description="EMA, SMA, WMA, or SMMA")
     trend_applied_price: str = Field(default="CLOSE")
 
-    # ── 1M Entry Timeframe (hardcoded) ────────────────────────────────────────
-    entry_timeframe: int = Field(default=60, description="Always 1 minute (60 seconds)")
+    # ── Entry Timeframe ────────────────────────────────────────────────────────
+    # Configurable — defaults to 1 minute (60s) for the microtrading strategy,
+    # but can be changed the same way as the trend timeframe.
+    entry_timeframe: int = Field(default=60, description="Entry candle timeframe in seconds")
 
     # ── EMA 3 (fast entry signal) ─────────────────────────────────────────────
     ema_fast_period: int = Field(default=3, ge=1, le=50)
@@ -40,6 +42,13 @@ class StrategySettingsUpdate(BaseModel):
     # ── Exit signals ──────────────────────────────────────────────────────────
     # NO duration fields — exit on crossback (EMA crosses BB) only
     exit_on_crossback_enabled: bool = Field(default=True, description="Exit when EMA crosses back through BB middle")
+
+    # ── ATR-based Stop Loss / Take Profit (optional, off by default) ────────────
+    # Independent of the trailing stop in Risk Settings — you can use either or both.
+    use_atr_sl_tp: bool = Field(default=False, description="Enable ATR-based stop-loss/take-profit")
+    atr_period: int = Field(default=14, ge=2, le=100)
+    atr_sl_multiplier: float = Field(default=1.5, ge=0.1, le=10.0, description="Stop-loss distance = ATR × this")
+    atr_tp_multiplier: float = Field(default=2.0, ge=0.1, le=10.0, description="Take-profit distance = ATR × this")
 
 
 class StrategySettingsResponse(StrategySettingsUpdate):

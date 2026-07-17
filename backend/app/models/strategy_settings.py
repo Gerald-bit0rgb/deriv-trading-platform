@@ -65,6 +65,15 @@ class StrategySettings(Base):
     # SELL closes when EMA crosses ABOVE BB middle
     exit_on_crossback_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # ── ATR-based Stop Loss / Take Profit (optional, off by default) ────────────
+    # Computed at entry time as entry_price ± (ATR * multiplier), then monitored
+    # client-side alongside crossback/trailing-stop exits. Independent of the
+    # trailing stop in Risk Settings — you can use either or both.
+    use_atr_sl_tp: Mapped[bool] = mapped_column(Boolean, default=False)
+    atr_period: Mapped[int] = mapped_column(Integer, default=14)
+    atr_sl_multiplier: Mapped[float] = mapped_column(Float, default=1.5)
+    atr_tp_multiplier: Mapped[float] = mapped_column(Float, default=2.0)
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

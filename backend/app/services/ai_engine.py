@@ -292,8 +292,12 @@ class AIEngine:
             return "BEARISH"
         return "NEUTRAL"
 
-    async def analyse(self, symbol: str, granularity: int = 60) -> Signal:
-        """Full 1M microtrading analysis — entry and exit signals."""
+    async def analyse(self, symbol: str, granularity: Optional[int] = None) -> Signal:
+        """Full 1M microtrading analysis — entry and exit signals.
+
+        granularity: optional override of the saved entry_timeframe setting,
+        useful for one-off API testing without changing the user's config.
+        """
 
         # ── Load parameters ────────────────────────────────────────────────────
         ema_period = self._get("ema_fast_period", 3)
@@ -310,16 +314,19 @@ class AIEngine:
         rsi_period = self._get("rsi_period", 14)
 
         require_trend = self._get("require_trend_alignment", True)
+        entry_timeframe = granularity if granularity is not None else self._get("entry_timeframe", 60)
 
-        # ── Fetch 1M candles + higher-timeframe trend, concurrently ─────────────
+        # ── Fetch entry-timeframe candles + higher-timeframe trend, concurrently ─
         try:
             if require_trend:
                 candles, trend_direction = await asyncio.gather(
-                    self.client.get_candles(symbol, granularity=60, count=100),
+                    self.client.get_candles(symbol, granularity=entry_timeframe, count=100),
                     self._get_trend_direction(symbol),
                 )
             else:
-                candles = await self.client.get_candles(symbol, granularity=60, count=100)
+                candles = await self.client.get_candles(
+                    symbol, granularity=entry_timeframe, count=100
+                )
                 trend_direction = None
         except Exception as e:
             logger.error("ai_engine.candle_fetch_failed", symbol=symbol, error=str(e))
@@ -493,7 +500,7 @@ class AIEngine:
             bb_std_dev = self._get("bb_std_dev", 2.0)
             bb_method = self._get("bb_method", "SMA")
 
-            candles = await self.client.get_candles(symbol, granularity=60, count=50)
+            candles = await self.client.get_candles(symbol, granularity=granularity, count=50)
             if len(candles) < bb_period + 3:
                 return False
 
@@ -586,7 +593,31 @@ class AIEngine:
             volatility="UNKNOWN",
         )
 
-    async def batch_analyse(self, symbols: List[str], granularity: int = 60) -> Dict[str, Signal]:
+    async def get_atr_value(
+        self, symbol: str, period: int = 14, granularity: int = 60
+    ) -> Optional[float]:
+        """
+        Current ATR (Average True Range) in price units, for computing
+        ATR-based stop-loss / take-profit distances at trade entry.
+        Returns None if candles can't be fetched.
+        """
+        try:
+            candles = await self.client.get_candles(
+                symbol, granularity=granularity, count=max(period + 10, 30)
+            )
+            if len(candles) < 2:
+                return None
+            highs = np.array([float(c["high"]) for c in candles])
+            lows = np.array([float(c["low"]) for c in candles])
+            closes = np.array([float(c["close"]) for c in candles])
+            return _atr(highs, lows, closes, period=period)
+        except Exception as e:
+            logger.warning("ai_engine.atr_fetch_failed", symbol=symbol, error=str(e))
+            return None
+
+    async def batch_analyse(
+        self, symbols: List[str], granularity: Optional[int] = None
+    ) -> Dict[str, Signal]:
         """Analyse multiple symbols concurrently."""
         tasks = [self.analyse(s, granularity) for s in symbols]
         results = await asyncio.gather(*tasks, return_exceptions=True)

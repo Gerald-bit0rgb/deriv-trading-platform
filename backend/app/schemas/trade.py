@@ -23,6 +23,8 @@ class TradeResponse(BaseModel):
     profit: Optional[float]
     entry_price: Optional[float]
     exit_price: Optional[float]
+    stop_loss_price: Optional[float]
+    take_profit_price: Optional[float]
     status: str
     is_win: Optional[bool]
     ai_signal: Optional[str]
