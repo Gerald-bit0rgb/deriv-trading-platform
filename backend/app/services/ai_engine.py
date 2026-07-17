@@ -10,23 +10,23 @@ Strategy logic:
 
   ENTRY signals (1M, must also match the trend direction above):
     BUY signal — all 3 must be true simultaneously:
-      1. EMA 3 crosses ABOVE BB middle band (18-period SMA)
+      1. EMA 3 is ABOVE BB middle band (18-period SMA)
       2. MACD Histogram value > 0
       3. RSI 14 > 50
 
     SELL signal — all 3 must be true simultaneously:
-      1. EMA 3 crosses BELOW BB middle band
+      1. EMA 3 is BELOW BB middle band
       2. MACD Histogram value < 0
       3. RSI 14 < 50
 
-  EXIT signals (crossback):
+  EXIT signals (position-based, same EMA/BB relationship as entry):
     BUY trade closes when:
-      - EMA 3 crosses BELOW BB middle band (bearish crossback)
+      - EMA 3 is BELOW BB middle band
 
     SELL trade closes when:
-      - EMA 3 crosses ABOVE BB middle band (bullish crossback)
+      - EMA 3 is ABOVE BB middle band
 
-  NO duration-based exits — trades stay open until crossback exit signal
+  NO duration-based exits — trades stay open until the exit signal fires
 """
 import asyncio
 from dataclasses import dataclass, field
@@ -235,7 +235,7 @@ class AIEngine:
     """
     1-Minute Microtrading strategy — fully configurable parameters.
     Indicators: EMA 3, Bollinger Bands 18, MACD (9, 12, 26), RSI 14
-    Exit: Crossback (EMA crosses back through BB middle)
+    Exit: Position-based (EMA above/below BB middle, opposite of entry)
     """
 
     def __init__(self, client: DerivClient, settings=None):
@@ -348,22 +348,15 @@ class AIEngine:
         macd_line, signal_line, macd_hist = _macd_histogram(closes, macd_fast, macd_slow, macd_signal)
         rsi = _rsi(closes, rsi_period)
 
-        # Get current and previous values (last 2 closed candles)
+        # Get current values (last closed candle)
         ema3_now = ema3[-2]
-        ema3_prev = ema3[-3] if len(ema3) >= 3 else ema3[-2]
-
         bb_mid_now = bb_middle[-2] if not np.isnan(bb_middle[-2]) else closes[-2]
-        bb_mid_prev = bb_middle[-3] if len(bb_middle) >= 3 and not np.isnan(bb_middle[-3]) else bb_mid_now
-
         macd_hist_now = macd_hist[-2] if len(macd_hist) > 0 else 0.0
         rsi_now = rsi[-2] if not np.isnan(rsi[-2]) else 50.0
 
-        # ── Detect EMA/BB crossover ────────────────────────────────────────────
+        # ── EMA position relative to BB middle (above/below, not a crossover) ───
         ema_above_bb_now = ema3_now > bb_mid_now
-        ema_above_bb_prev = ema3_prev > bb_mid_prev
-
-        bullish_cross = (not ema_above_bb_prev) and ema_above_bb_now
-        bearish_cross = ema_above_bb_prev and (not ema_above_bb_now)
+        ema_below_bb_now = ema3_now < bb_mid_now
 
         # ── Signal logic ───────────────────────────────────────────────────────
         macd_positive = macd_hist_now > 0
@@ -379,61 +372,61 @@ class AIEngine:
         confidence = 0.0
         reason_parts = []
 
-        if bullish_cross and macd_positive and rsi_high and trend_bullish:
+        if ema_above_bb_now and macd_positive and rsi_high and trend_bullish:
             signal = "BUY"
             reason_parts = [
-                f"EMA({ema_period}) crossed above BB({bb_period}) middle",
+                f"EMA({ema_period}) above BB({bb_period}) middle",
                 f"MACD histogram > 0 ({macd_hist_now:.6f})",
                 f"RSI({rsi_period}) > 50 ({rsi_now:.1f})",
             ]
             if require_trend:
                 reason_parts.append("4H trend BULLISH (aligned)")
             confidence = self._calc_confidence(
-                bullish_cross, macd_positive, rsi_high, trend_bullish if require_trend else None
+                ema_above_bb_now, macd_positive, rsi_high, trend_bullish if require_trend else None
             )
 
-        elif bearish_cross and macd_negative and rsi_low and trend_bearish:
+        elif ema_below_bb_now and macd_negative and rsi_low and trend_bearish:
             signal = "SELL"
             reason_parts = [
-                f"EMA({ema_period}) crossed below BB({bb_period}) middle",
+                f"EMA({ema_period}) below BB({bb_period}) middle",
                 f"MACD histogram < 0 ({macd_hist_now:.6f})",
                 f"RSI({rsi_period}) < 50 ({rsi_now:.1f})",
             ]
             if require_trend:
                 reason_parts.append("4H trend BEARISH (aligned)")
             confidence = self._calc_confidence(
-                bearish_cross, macd_negative, rsi_low, trend_bearish if require_trend else None
+                ema_below_bb_now, macd_negative, rsi_low, trend_bearish if require_trend else None
             )
 
         else:
             # WAIT — diagnose why
-            if require_trend and bullish_cross and macd_positive and rsi_high and not trend_bullish:
+            if require_trend and ema_above_bb_now and macd_positive and rsi_high and not trend_bullish:
                 reason_parts.append(
                     f"1M BUY conditions met but 4H trend is {trend_direction or 'unavailable'} (needs BULLISH)"
                 )
-            elif require_trend and bearish_cross and macd_negative and rsi_low and not trend_bearish:
+            elif require_trend and ema_below_bb_now and macd_negative and rsi_low and not trend_bearish:
                 reason_parts.append(
                     f"1M SELL conditions met but 4H trend is {trend_direction or 'unavailable'} (needs BEARISH)"
                 )
-            if not bullish_cross and not bearish_cross:
-                reason_parts.append(f"No EMA/BB crossover (EMA: {ema3_now:.5f}, BB: {bb_mid_now:.5f})")
+            if not ema_above_bb_now and not ema_below_bb_now:
+                reason_parts.append(f"EMA at BB middle (EMA: {ema3_now:.5f}, BB: {bb_mid_now:.5f})")
             if not macd_positive and not macd_negative:
                 reason_parts.append(f"MACD histogram near zero ({macd_hist_now:.6f})")
-            if signal == "WAIT" and (bullish_cross or bearish_cross):
-                if bullish_cross and not (macd_positive and rsi_high):
+            if signal == "WAIT" and (ema_above_bb_now or ema_below_bb_now):
+                if ema_above_bb_now and not (macd_positive and rsi_high):
                     parts = []
                     if not macd_positive:
                         parts.append(f"MACD not positive ({macd_hist_now:.6f})")
                     if not rsi_high:
                         parts.append(f"RSI not > 50 ({rsi_now:.1f})")
-                    reason_parts.append(f"Bullish cross but: {', '.join(parts)}")
-                elif bearish_cross and not (macd_negative and rsi_low):
+                    reason_parts.append(f"EMA above BB but: {', '.join(parts)}")
+                elif ema_below_bb_now and not (macd_negative and rsi_low):
                     parts = []
                     if not macd_negative:
                         parts.append(f"MACD not negative ({macd_hist_now:.6f})")
                     if not rsi_low:
                         parts.append(f"RSI not < 50 ({rsi_now:.1f})")
-                    reason_parts.append(f"Bearish cross but: {', '.join(parts)}")
+                    reason_parts.append(f"EMA below BB but: {', '.join(parts)}")
 
             if not reason_parts:
                 reason_parts.append("Waiting for alignment of all 3 indicators")
@@ -480,7 +473,8 @@ class AIEngine:
 
     async def check_exit_signal(self, symbol: str, trade_type: str, granularity: int = 60) -> bool:
         """
-        Check if an open trade should be exited based on crossback signal.
+        Check if an open trade should be exited based on the EMA's position
+        relative to BB middle.
 
         Args:
             symbol: Trading symbol
@@ -491,8 +485,8 @@ class AIEngine:
             True if exit signal is triggered, False otherwise
 
         Exit rules:
-          - BUY trade closes when EMA crosses BELOW BB middle (bearish crossback)
-          - SELL trade closes when EMA crosses ABOVE BB middle (bullish crossback)
+          - BUY trade closes when EMA is below BB middle
+          - SELL trade closes when EMA is above BB middle
         """
         try:
             ema_period = self._get("ema_fast_period", 3)
@@ -508,38 +502,30 @@ class AIEngine:
             ema3 = _ema(closes, ema_period)
             _, bb_middle, _ = _bb_bands(closes, bb_period, bb_std_dev, bb_method)
 
-            # Current and previous bar
             ema3_now = ema3[-2]
-            ema3_prev = ema3[-3] if len(ema3) >= 3 else ema3[-2]
-
             bb_mid_now = bb_middle[-2] if not np.isnan(bb_middle[-2]) else closes[-2]
-            bb_mid_prev = bb_middle[-3] if len(bb_middle) >= 3 and not np.isnan(bb_middle[-3]) else bb_mid_now
-
             ema_above_bb_now = ema3_now > bb_mid_now
-            ema_above_bb_prev = ema3_prev > bb_mid_prev
 
             # ── Exit logic ────────────────────────────────────────────────────
             if trade_type == "BUY":
-                # BUY closes when EMA crosses BELOW BB middle (bearish crossback)
-                bearish_cross = ema_above_bb_prev and (not ema_above_bb_now)
-                if bearish_cross:
+                # BUY closes when EMA is below BB middle
+                if not ema_above_bb_now:
                     logger.info(
                         "ai_engine.exit_signal",
                         symbol=symbol,
                         trade_type=trade_type,
-                        reason="EMA crossed below BB middle (bearish crossback)",
+                        reason="EMA below BB middle",
                     )
                     return True
 
             elif trade_type == "SELL":
-                # SELL closes when EMA crosses ABOVE BB middle (bullish crossback)
-                bullish_cross = (not ema_above_bb_prev) and ema_above_bb_now
-                if bullish_cross:
+                # SELL closes when EMA is above BB middle
+                if ema_above_bb_now:
                     logger.info(
                         "ai_engine.exit_signal",
                         symbol=symbol,
                         trade_type=trade_type,
-                        reason="EMA crossed above BB middle (bullish crossback)",
+                        reason="EMA above BB middle",
                     )
                     return True
 
@@ -555,7 +541,7 @@ class AIEngine:
             return False
 
     def _calc_confidence(
-        self, crossover: bool, macd_ok: bool, rsi_ok: bool, trend_ok: Optional[bool] = None
+        self, position_aligned: bool, macd_ok: bool, rsi_ok: bool, trend_ok: Optional[bool] = None
     ) -> float:
         """
         Confidence score (0-1).
@@ -565,7 +551,7 @@ class AIEngine:
         """
         if trend_ok is None:
             score = 0.0
-            if crossover:
+            if position_aligned:
                 score += 0.4
             if macd_ok:
                 score += 0.3
@@ -574,7 +560,7 @@ class AIEngine:
             return min(round(score, 3), 1.0)
 
         score = 0.0
-        if crossover:
+        if position_aligned:
             score += 0.3
         if macd_ok:
             score += 0.2

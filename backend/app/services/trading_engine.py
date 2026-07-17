@@ -5,9 +5,9 @@ Automated bot loop:
   Every new 1M bar:
     1. Run 1M microtrading analysis on all watchlist symbols
     2. If BUY/SELL signal with high confidence → open a MULTUP/MULTDOWN position
-    3. Check open trades for crossback exit, trailing stop hits, or status sync
+    3. Check open trades for exit signal, trailing stop hits, or status sync
   Every 5 seconds:
-    4. Check crossback exit signal (EMA crosses back through BB middle)
+    4. Check exit signal (EMA above/below BB middle, opposite of entry)
     5. Check trailing stop
     6. Sync any trades closed on Deriv's side (e.g. stop-out)
 
@@ -16,8 +16,8 @@ Settings (read from user's RiskSettings):
   max_lot_size        → per-trade lot cap
   daily_profit_target → daily stop (optional)
 
-No fixed-duration exits — positions stay open until a crossback or trailing
-stop closes them, same as an MT5 Expert Advisor.
+No fixed-duration exits — positions stay open until the exit signal or
+trailing stop closes them, same as an MT5 Expert Advisor.
 """
 import asyncio
 from enum import Enum
@@ -585,10 +585,14 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                             await db.commit()
                             continue
                         except Exception as e:
+                            error_msg = str(e)
+                            if "not found among your open positions" in error_msg.lower():
+                                await _recover_closed_contract(session, db, trade)
+                                continue
                             logger.warning(
                                 "monitor.atr_sl_tp_sell_failed",
                                 trade_id=trade.id,
-                                error=str(e),
+                                error=error_msg,
                             )
             except Exception as e:
                 logger.warning(
@@ -597,7 +601,7 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                     error=str(e),
                 )
 
-        # ── Priority 1: Crossback exit (the strategy's real exit signal) ──
+        # ── Priority 1: Exit signal (EMA above/below BB middle) ────────────
         if strat.exit_on_crossback_enabled and session.client:
             try:
                 trade_direction = "BUY" if trade.contract_type == "MULTUP" else "SELL"
@@ -679,10 +683,14 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                         await db.commit()
                         continue
                     except Exception as e:
+                        error_msg = str(e)
+                        if "not found among your open positions" in error_msg.lower():
+                            await _recover_closed_contract(session, db, trade)
+                            continue
                         logger.warning(
                             "monitor.trailing_stop_sell_failed",
                             trade_id=trade.id,
-                            error=str(e),
+                            error=error_msg,
                         )
             except Exception as e:
                 logger.warning(
@@ -872,7 +880,20 @@ async def close_trade_manually(
     if session is None or session.client is None:
         raise RuntimeError("Trading session not active")
 
-    sell_info = await session.client.sell_contract(int(trade.contract_id))
+    try:
+        sell_info = await session.client.sell_contract(int(trade.contract_id))
+    except Exception as e:
+        error_msg = str(e)
+        if "not found among your open positions" in error_msg.lower():
+            # Deriv already closed this contract on their side (stop-out,
+            # expiry, etc.) — recover the real numbers if we can, and close
+            # it in our records either way instead of leaving the user stuck
+            # unable to close a trade that isn't actually open anymore.
+            await _recover_closed_contract(session, db, trade)
+            await db.refresh(trade)
+            return trade
+        raise RuntimeError(f"Could not close trade: {error_msg}")
+
     sold_for = float(sell_info.get("sold_for", 0))
     profit = float(sell_info.get("profit", sold_for))
 
