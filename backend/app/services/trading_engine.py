@@ -773,8 +773,13 @@ async def execute_trade(
         raise RuntimeError("Emergency stop is active — trading halted")
     if not risk.trading_enabled:
         raise RuntimeError("Trading is disabled in risk settings")
+    if lot_size < 1.0:
+        raise RuntimeError(
+            f"Stake ${lot_size:.2f} is below Deriv's $1.00 minimum. "
+            f"Update your stake in Risk Settings or Trading."
+        )
     if lot_size > risk.max_lot_size:
-        raise RuntimeError(f"Lot size {lot_size} exceeds max allowed {risk.max_lot_size}")
+        raise RuntimeError(f"Stake ${lot_size:.2f} exceeds max allowed ${risk.max_lot_size:.2f}")
 
     summary = await trade_crud.get_daily_summary(db, user.id)
     if summary["today_profit"] <= -abs(risk.max_daily_loss):

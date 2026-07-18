@@ -6,9 +6,12 @@ from pydantic import BaseModel, Field
 
 
 class RiskSettingsUpdate(BaseModel):
-    # ── Lot-based trading (not USD stake) ──────────────────────────────────
-    default_lot_size: float = Field(gt=0, default=0.01, description="Lot size e.g. 0.01, 0.1, 1.0")
-    max_lot_size: float = Field(gt=0, default=1.0, description="Max lot size per trade")
+    # ── Stake per trade (USD) ────────────────────────────────────────────────
+    # NOTE: field named "lot_size" for continuity, but this is a direct USD
+    # stake amount — Deriv's Multiplier API has no lot concept and enforces
+    # a $1.00 minimum stake per trade.
+    default_lot_size: float = Field(ge=1.0, default=1.0, description="Stake per trade in USD (Deriv minimum: $1.00)")
+    max_lot_size: float = Field(ge=1.0, default=100.0, description="Max stake per trade in USD")
 
     # ── Daily loss limit ──────────────────────────────────────────────────
     max_daily_loss: float = Field(ge=0, default=50.0, description="Max daily loss in USD")

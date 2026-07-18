@@ -218,11 +218,24 @@ async def init_db() -> None:
             # ── Risk settings: full defensive coverage ────────────────────────────
             """
             ALTER TABLE risk_settings
-            ADD COLUMN IF NOT EXISTS default_lot_size FLOAT DEFAULT 0.01
+            ADD COLUMN IF NOT EXISTS default_lot_size FLOAT DEFAULT 1.0
             """,
             """
             ALTER TABLE risk_settings
-            ADD COLUMN IF NOT EXISTS max_lot_size FLOAT DEFAULT 1.0
+            ADD COLUMN IF NOT EXISTS max_lot_size FLOAT DEFAULT 100.0
+            """,
+            # ── Repair existing stake values below Deriv's $1.00 minimum ──────────
+            # "lot_size" fields are a direct USD stake, not an MT5-style lot
+            # multiplier — earlier defaults of 0.01/1.0 were below what Deriv's
+            # Multiplier API actually accepts, causing every auto-trade to fail
+            # with "Please enter a stake amount that's at least 1.00." This
+            # bumps any already-saved values up to a valid stake so existing
+            # users aren't stuck with a broken configuration after this update.
+            """
+            UPDATE risk_settings SET default_lot_size = 1.0 WHERE default_lot_size < 1.0
+            """,
+            """
+            UPDATE risk_settings SET max_lot_size = 100.0 WHERE max_lot_size < 1.0
             """,
             """
             ALTER TABLE risk_settings

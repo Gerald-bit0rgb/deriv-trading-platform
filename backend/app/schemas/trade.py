@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 class TradeCreate(BaseModel):
     symbol: str = Field(examples=["R_100", "frxEURUSD"])
     contract_type: str = Field(examples=["MULTUP", "MULTDOWN"])
-    lot_size: float = Field(gt=0, examples=[0.01, 0.1, 1.0])
+    # NOTE: named "lot_size" for continuity, but this is a direct USD stake —
+    # Deriv's Multiplier API enforces a $1.00 minimum stake per trade.
+    lot_size: float = Field(ge=1.0, examples=[1.0, 5.0, 10.0], description="Stake in USD (Deriv minimum: $1.00)")
 
 
 class TradeResponse(BaseModel):

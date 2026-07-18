@@ -24,10 +24,12 @@ class RiskSettings(Base):
         Integer, ForeignKey("users.id"), unique=True, nullable=False
     )
 
-    # ── Lot-based trading (not USD stake) ──────────────────────────────────
-    # default_lot_size: e.g., 0.01, 0.1, 1.0 lots
-    default_lot_size: Mapped[float] = mapped_column(Float, default=0.01)
-    max_lot_size: Mapped[float] = mapped_column(Float, default=1.0)
+    # ── Stake per trade (USD) ───────────────────────────────────────────────
+    # NOTE: field is named "lot_size" for continuity with earlier versions,
+    # but Deriv's Multiplier API has no lot concept — this value is sent
+    # directly as the USD stake amount. Deriv enforces a $1.00 minimum stake.
+    default_lot_size: Mapped[float] = mapped_column(Float, default=1.0)
+    max_lot_size: Mapped[float] = mapped_column(Float, default=100.0)
 
     # ── Daily loss limit (in USD or account currency) ─────────────────────
     max_daily_loss: Mapped[float] = mapped_column(Float, default=50.0)
