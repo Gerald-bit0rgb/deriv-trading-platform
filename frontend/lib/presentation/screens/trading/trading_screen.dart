@@ -24,7 +24,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
   final _formKey = GlobalKey<FormState>();
   String _symbol = AppConstants.popularSymbols.first;
   String _contractType = 'MULTUP';
-  double _lotSize = 0.01;
+  double _lotSize = 1.0;
   bool _isSubmitting = false;
 
   Future<void> _placeTrade() async {
@@ -141,18 +141,18 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Lot size
+                    // Stake (USD) — Deriv's Multiplier API requires a $1.00 minimum
                     TextFormField(
                       initialValue: _lotSize.toString(),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
-                        labelText: 'Lot Size',
-                        prefixIcon: Icon(Icons.scale),
+                        labelText: 'Stake (\$)',
+                        prefixIcon: Icon(Icons.attach_money),
                       ),
-                      onChanged: (v) => _lotSize = double.tryParse(v) ?? 0.01,
+                      onChanged: (v) => _lotSize = double.tryParse(v) ?? 1.0,
                       validator: (v) {
                         final n = double.tryParse(v ?? '');
-                        if (n == null || n <= 0) return 'Enter a valid lot size';
+                        if (n == null || n < 1.0) return 'Minimum stake is \$1.00';
                         return null;
                       },
                     ),
@@ -170,7 +170,7 @@ class _TradingScreenState extends ConsumerState<TradingScreen> {
                               ),
                             )
                           : Text(
-                              '${_contractType == 'MULTUP' ? '▲ BUY' : '▼ SELL'} — $_lotSize lots',
+                              '${_contractType == 'MULTUP' ? '▲ BUY' : '▼ SELL'} — \$$_lotSize',
                             ),
                     ),
                   ],

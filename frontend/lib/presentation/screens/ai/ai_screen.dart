@@ -22,7 +22,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   bool _isLoading = false;
   String? _error;
   bool _isAutoTrading = false;
-  double _autoLotSize = 0.01;
+  double _autoLotSize = 1.0;
 
   Future<void> _analyse() async {
     setState(() { _isLoading = true; _error = null; });
@@ -170,10 +170,10 @@ class _AiScreenState extends ConsumerState<AiScreen> {
                       initialValue: _autoLotSize.toString(),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
-                        labelText: 'Lot Size',
-                        prefixIcon: Icon(Icons.scale),
+                        labelText: 'Stake (\$)',
+                        prefixIcon: Icon(Icons.attach_money),
                       ),
-                      onChanged: (v) => _autoLotSize = double.tryParse(v) ?? 0.01,
+                      onChanged: (v) => _autoLotSize = double.tryParse(v) ?? 1.0,
                     ),
                   ),
                   const SizedBox(width: 8),

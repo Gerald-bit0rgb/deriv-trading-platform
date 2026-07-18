@@ -122,7 +122,7 @@ class TradeCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
-          // Stats Grid: Lot Size, Entry/Exit Price, Profit
+          // Stats Grid: Stake, Entry/Exit Price, Profit
           GridView(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -133,7 +133,7 @@ class TradeCard extends StatelessWidget {
               childAspectRatio: 1.2,
             ),
             children: [
-              _stat('Lot Size', trade.lotSize.toStringAsFixed(2)),
+              _stat('Stake', '\$${trade.lotSize.toStringAsFixed(2)}'),
               if (trade.entryPrice != null)
                 _stat('Entry', '\$${trade.entryPrice!.toStringAsFixed(5)}')
               else

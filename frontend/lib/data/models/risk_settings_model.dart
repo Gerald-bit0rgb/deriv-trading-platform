@@ -18,8 +18,8 @@ class RiskSettingsModel {
   const RiskSettingsModel({
     this.id = 0,
     this.userId = 0,
-    this.defaultLotSize = 0.01,
-    this.maxLotSize = 1.0,
+    this.defaultLotSize = 1.0,
+    this.maxLotSize = 100.0,
     this.maxDailyLoss = 50.0,
     this.maxDailyTrades = 100,
     this.dailyProfitTarget = 200.0,
@@ -35,8 +35,8 @@ class RiskSettingsModel {
     return RiskSettingsModel(
       id: json['id'] as int? ?? 0,
       userId: json['user_id'] as int? ?? 0,
-      defaultLotSize: (json['default_lot_size'] as num?)?.toDouble() ?? 0.01,
-      maxLotSize: (json['max_lot_size'] as num?)?.toDouble() ?? 1.0,
+      defaultLotSize: (json['default_lot_size'] as num?)?.toDouble() ?? 1.0,
+      maxLotSize: (json['max_lot_size'] as num?)?.toDouble() ?? 100.0,
       maxDailyLoss: (json['max_daily_loss'] as num?)?.toDouble() ?? 50.0,
       maxDailyTrades: json['max_daily_trades'] as int? ?? 100,
       dailyProfitTarget: (json['daily_profit_target'] as num?)?.toDouble() ?? 200.0,

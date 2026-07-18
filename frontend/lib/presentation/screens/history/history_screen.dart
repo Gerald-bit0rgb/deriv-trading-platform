@@ -416,9 +416,9 @@ class _TradeHistoryCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _DetailRow(
-                        icon: Icons.scale,
-                        label: 'Lot Size',
-                        value: trade.lotSize.toStringAsFixed(2),
+                        icon: Icons.attach_money,
+                        label: 'Stake',
+                        value: '\$${trade.lotSize.toStringAsFixed(2)}',
                       ),
                     ),
                     Expanded(

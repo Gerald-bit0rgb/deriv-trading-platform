@@ -22,7 +22,13 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
   bool _isSaving = false;
 
   void _initSettings(RiskSettingsModel s) {
-    _settings ??= s;
+    // Defensive clamp: if this loads before the backend's $1 minimum-stake
+    // migration has run, an old sub-$1 saved value would otherwise crash
+    // the Slider widgets below (value must be >= min).
+    _settings ??= s.copyWith(
+      defaultLotSize: s.defaultLotSize.clamp(1.0, 1000.0),
+      maxLotSize: s.maxLotSize.clamp(1.0, 1000.0),
+    );
   }
 
   Future<void> _save() async {
@@ -166,18 +172,18 @@ class _RiskScreenState extends ConsumerState<RiskScreen> {
 
               const _SectionTitle('Position Sizing'),
               _SliderTile(
-                label: 'Default Lot Size',
+                label: 'Default Stake (\$)',
                 value: _settings!.defaultLotSize,
-                min: 0.01, max: 1.0, divisions: 99,
-                format: (v) => v.toStringAsFixed(2),
+                min: 1.0, max: 100.0, divisions: 99,
+                format: (v) => '\$${v.toStringAsFixed(2)}',
                 onChanged: (v) => setState(() =>
                     _settings = _settings!.copyWith(defaultLotSize: v)),
               ),
               _SliderTile(
-                label: 'Max Lot Size',
+                label: 'Max Stake (\$)',
                 value: _settings!.maxLotSize,
-                min: 0.01, max: 10.0, divisions: 999,
-                format: (v) => v.toStringAsFixed(2),
+                min: 1.0, max: 1000.0, divisions: 999,
+                format: (v) => '\$${v.toStringAsFixed(2)}',
                 onChanged: (v) => setState(() =>
                     _settings = _settings!.copyWith(maxLotSize: v)),
               ),

@@ -12,22 +12,26 @@ class AiService {
   final Dio _dio;
   AiService(this._dio);
 
-  Future<AiSignalModel> getSignal(String symbol, {int granularity = 60}) async {
+  // granularity is nullable and omitted from the request unless explicitly
+  // provided — this lets the backend fall back to the user's saved entry
+  // timeframe (Strategy Settings) instead of silently overriding it with a
+  // hardcoded value on every call.
+  Future<AiSignalModel> getSignal(String symbol, {int? granularity}) async {
     final r = await _dio.get(
       '/ai/signal/$symbol',
-      queryParameters: {'granularity': granularity},
+      queryParameters: granularity != null ? {'granularity': granularity} : null,
     );
     return AiSignalModel.fromJson(r.data as Map<String, dynamic>);
   }
 
   Future<List<AiSignalModel>> getBatchSignals(
     List<String> symbols, {
-    int granularity = 60,
+    int? granularity,
   }) async {
     final r = await _dio.post(
       '/ai/signal/batch',
       data: symbols,
-      queryParameters: {'granularity': granularity},
+      queryParameters: granularity != null ? {'granularity': granularity} : null,
     );
     return (r.data as List)
         .map((e) => AiSignalModel.fromJson(e as Map<String, dynamic>))
@@ -37,13 +41,13 @@ class AiService {
   Future<Map<String, dynamic>> autoTrade({
     required String symbol,
     required double lotSize,
-    int granularity = 60,
+    int? granularity,
   }) async {
     final r = await _dio.post(
       '/ai/auto-trade/$symbol',
       queryParameters: {
         'lot_size': lotSize,
-        'granularity': granularity,
+        if (granularity != null) 'granularity': granularity,
       },
     );
     return r.data as Map<String, dynamic>;
