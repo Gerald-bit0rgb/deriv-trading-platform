@@ -30,14 +30,12 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       final signal = await ref.read(aiServiceProvider).getSignal(_selectedSymbol);
       setState(() { _signal = signal; _isLoading = false; });
     } catch (e) {
-      final msg = e.toString();
+      final realMessage = Fmt.apiError(e);
       String friendlyError;
-      if (msg.contains('400') || msg.contains('trading session')) {
+      if (realMessage.toLowerCase().contains('trading session not active')) {
         friendlyError = 'Please start the bot first.\nGo to Dashboard → tap Start Bot, then try again.';
-      } else if (msg.contains('500') || msg.contains('connection')) {
-        friendlyError = 'Server error. Please try again in a moment.';
       } else {
-        friendlyError = 'Error: $msg';
+        friendlyError = realMessage;
       }
       setState(() { _error = friendlyError; _isLoading = false; });
     }
@@ -62,16 +60,16 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       }
     } catch (e) {
       if (mounted) {
-        final msg = e.toString();
+        final realMessage = Fmt.apiError(e);
         String friendly;
-        if (msg.contains('400') || msg.contains('trading session')) {
-          // Bot session lost on server — restart it automatically
+        if (realMessage.toLowerCase().contains('trading session not active')) {
+          // Bot genuinely isn't running on the server — restart it.
           friendly = 'Bot session expired. Restarting bot...';
           ref.read(botStatusProvider.notifier).startBot();
-        } else if (msg.contains('500')) {
-          friendly = 'Server error. Please try again in a moment.';
         } else {
-          friendly = 'Auto-trade error. Please try again.';
+          // Any other error (validation, risk limit, Deriv API constraint,
+          // etc.) — show the real reason instead of guessing.
+          friendly = realMessage;
         }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(friendly),
