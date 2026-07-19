@@ -10,6 +10,7 @@ Flow:
 """
 import asyncio
 import json
+import re
 from typing import Callable, Dict, List, Optional
 
 import httpx
@@ -46,11 +47,12 @@ class DerivClient:
         self._should_run = False
         self._listener_task: Optional[asyncio.Task] = None
         self._reconnect_attempts = 0
-        # Cache of valid Multiplier values per symbol — Deriv restricts which
-        # multiplier values each symbol accepts (e.g. Volatility indices vs
-        # Jump indices vs Forex all have different allowed sets), so this is
-        # looked up dynamically via contracts_for rather than guessed.
-        self._multiplier_cache: Dict[str, list] = {}
+        # Cache of the correct Multiplier value per symbol — Deriv restricts
+        # which multiplier values each symbol accepts (e.g. Volatility
+        # indices vs Jump indices vs Forex all differ), and this is learned
+        # from Deriv's own rejection message the first time a symbol is
+        # traded, then reused for the life of this client/session.
+        self._multiplier_cache: Dict[str, int] = {}
 
     # ─────────────────────────────────────────────────────────────────────────
     # REST helpers
@@ -269,45 +271,6 @@ class DerivClient:
         })
         return response.get("contracts_for", {})
 
-    async def get_valid_multiplier(self, symbol: str, preferred: int = 100) -> int:
-        """
-        Deriv restricts which multiplier values each symbol accepts, and this
-        set varies a lot — Volatility indices, Jump indices, and Forex pairs
-        all have different allowed ranges. Rather than guess per symbol
-        category (which breaks the moment a new symbol is traded), this asks
-        Deriv directly via contracts_for and picks the closest valid value to
-        the preferred one. Results are cached per symbol for the life of this
-        client/session since the allowed set for a given symbol doesn't
-        change during a session.
-        """
-        if symbol in self._multiplier_cache:
-            allowed = self._multiplier_cache[symbol]
-        else:
-            allowed = []
-            try:
-                data = await self.get_contracts_for(symbol)
-                for spec in data.get("available", []):
-                    m_range = spec.get("multiplier_range")
-                    if m_range:
-                        allowed = [int(m) for m in m_range]
-                        break
-            except Exception as e:
-                logger.warning(
-                    "deriv.contracts_for_failed", symbol=symbol, error=str(e)
-                )
-            self._multiplier_cache[symbol] = allowed
-
-        if not allowed:
-            # Couldn't determine the allowed set — fall back to the
-            # requested value and let Deriv's own validation catch it with
-            # a clear error naming the actual acceptable values, same as it
-            # already does today.
-            return preferred
-
-        if preferred in allowed:
-            return preferred
-        return min(allowed, key=lambda m: abs(m - preferred))
-
     # ─────────────────────────────────────────────────────────────────────────
     # Market data
     # ─────────────────────────────────────────────────────────────────────────
@@ -364,29 +327,74 @@ class DerivClient:
         multiplier:    preferred leverage, e.g. 100 for 100x — Deriv accepts
                         a different set of valid multipliers per symbol
                         (Volatility indices, Jump indices, Forex, etc. all
-                        differ), so this is resolved to the closest value
-                        that symbol actually allows before sending the order.
+                        differ) and rejects the proposal outright if it's
+                        wrong. Rather than guess or rely on a possibly
+                        mis-parsed contracts_for lookup, this uses the cached
+                        value learned from a previous attempt for this
+                        symbol if there is one, and otherwise lets Deriv's
+                        own rejection tell us the valid set directly — then
+                        retries once with the closest valid value and
+                        remembers it for next time.
 
         Unlike binary options (CALL/PUT), Multiplier contracts have no fixed
         duration — they stay open until explicitly sold via sell_contract(),
         which is what makes real entries/exits possible.
         """
-        resolved_multiplier = await self.get_valid_multiplier(symbol, preferred=multiplier)
-        if resolved_multiplier != multiplier:
+        resolved_multiplier = self._multiplier_cache.get(symbol, multiplier)
+
+        try:
+            contract = await self._buy_with_multiplier(
+                symbol, contract_type, amount, resolved_multiplier
+            )
+        except Exception as e:
+            corrected = self._parse_multiplier_from_error(str(e))
+            if corrected is None:
+                raise
+            best = min(corrected, key=lambda m: abs(m - multiplier))
             logger.info(
                 "deriv.multiplier_adjusted",
                 symbol=symbol,
                 requested=multiplier,
-                resolved=resolved_multiplier,
+                rejected=resolved_multiplier,
+                resolved=best,
+                deriv_accepted=corrected,
+            )
+            self._multiplier_cache[symbol] = best
+            contract = await self._buy_with_multiplier(
+                symbol, contract_type, amount, best
             )
 
+        return contract
+
+    @staticmethod
+    def _parse_multiplier_from_error(error_text: str) -> Optional[list]:
+        """
+        Deriv's own rejection message names the exact accepted values, e.g.
+        "Multiplier is not in acceptable range. Accepts 80,200,400,600,800."
+        This is the most authoritative source available — parse it directly
+        rather than relying on a separate lookup call that may not match
+        Deriv's real response shape.
+        """
+        if "not in acceptable range" not in error_text.lower():
+            return None
+        match = re.search(r"Accepts\s+([\d,\s]+)\.?", error_text)
+        if not match:
+            return None
+        try:
+            return [int(v.strip()) for v in match.group(1).split(",") if v.strip()]
+        except ValueError:
+            return None
+
+    async def _buy_with_multiplier(
+        self, symbol: str, contract_type: str, amount: float, multiplier: int
+    ) -> dict:
         proposal = await self._send({
             "proposal": 1,
             "amount": amount,
             "basis": "stake",
             "contract_type": contract_type,
             "currency": "USD",
-            "multiplier": resolved_multiplier,
+            "multiplier": multiplier,
             "underlying_symbol": symbol,
         })
         proposal_id = proposal.get("proposal", {}).get("id")
@@ -395,7 +403,6 @@ class DerivClient:
         if not proposal_id:
             raise RuntimeError(f"Failed to get proposal: {proposal}")
 
-        # Buy
         buy_response = await self._send({"buy": proposal_id, "price": ask_price})
         contract = buy_response.get("buy", {})
         logger.info(
@@ -404,7 +411,7 @@ class DerivClient:
             symbol=symbol,
             contract_type=contract_type,
             amount=amount,
-            multiplier=resolved_multiplier,
+            multiplier=multiplier,
         )
         return contract
 
