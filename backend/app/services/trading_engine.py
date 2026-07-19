@@ -576,7 +576,8 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                                 int(trade.contract_id)
                             )
                             sold_for = float(sell_info.get("sold_for", 0))
-                            profit = float(sell_info.get("profit", sold_for))
+                            profit = sell_info.get("profit")
+                            profit = float(profit) if profit is not None else sold_for - trade.lot_size
                             await trade_crud.close_trade(
                                 db,
                                 trade=trade,
@@ -627,7 +628,8 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                     try:
                         sell_info = await session.client.sell_contract(int(trade.contract_id))
                         sold_for = float(sell_info.get("sold_for", 0))
-                        profit = float(sell_info.get("profit", sold_for))
+                        profit = sell_info.get("profit")
+                        profit = float(profit) if profit is not None else sold_for - trade.lot_size
                         await trade_crud.close_trade(
                             db,
                             trade=trade,
@@ -679,7 +681,8 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                             int(trade.contract_id)
                         )
                         sold_for = float(sell_info.get("sold_for", 0))
-                        profit = float(sell_info.get("profit", sold_for))
+                        profit = sell_info.get("profit")
+                        profit = float(profit) if profit is not None else sold_for - trade.lot_size
                         await trade_crud.close_trade(
                             db,
                             trade=trade,
@@ -918,7 +921,8 @@ async def close_trade_manually(
         raise RuntimeError(f"Could not close trade: {error_msg}")
 
     sold_for = float(sell_info.get("sold_for", 0))
-    profit = float(sell_info.get("profit", sold_for))
+    profit = sell_info.get("profit")
+    profit = float(profit) if profit is not None else sold_for - trade.lot_size
 
     updated = await trade_crud.close_trade(
         db,
