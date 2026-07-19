@@ -18,6 +18,7 @@ class AISignalResponse(BaseModel):
     rsi_value: Optional[float] = None
     volatility: str = "MEDIUM"         # HIGH | MEDIUM | LOW
     trend_direction: Optional[str] = None   # BULLISH | BEARISH | NEUTRAL
+    entry_timeframe: Optional[int] = None   # seconds — actual candle timeframe used
     generated_at: datetime
 
 

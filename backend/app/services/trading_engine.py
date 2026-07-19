@@ -215,6 +215,7 @@ async def _strategy_loop(session: UserSession) -> None:
         except asyncio.CancelledError:
             break
         except Exception as e:
+            await db.rollback()
             logger.error("strategy.error", user_id=session.user_id, error=str(e))
 
         # Check every 30 seconds for a new 1M bar
@@ -270,6 +271,7 @@ async def _run_microtrading_loop(session: UserSession, db: AsyncSession) -> None
                     epoch=current_bar_epoch,
                     symbols=symbols)
     except Exception as e:
+        await db.rollback()
         logger.error("strategy.bar_check_failed",
                      user_id=session.user_id,
                      symbol=clock_symbol,
@@ -343,6 +345,7 @@ async def _analyse_and_trade_symbol(
             rsi=signal.rsi_value,
         )
     except Exception as e:
+        await db.rollback()
         logger.error("strategy.analysis_failed",
                      user_id=session.user_id, symbol=symbol, error=str(e))
         return
@@ -409,6 +412,12 @@ async def _analyse_and_trade_symbol(
         )
 
     except Exception as e:
+        # Roll back so this failure doesn't poison the shared session for
+        # every other symbol still to be checked in this cycle — without
+        # this, one failed trade (e.g. a validation error) would cause
+        # "This Session's transaction has been rolled back due to a
+        # previous exception during flush" on every symbol after it.
+        await db.rollback()
         logger.error("strategy.trade_failed",
                      user_id=session.user_id, symbol=symbol, error=str(e))
 
@@ -445,6 +454,7 @@ async def _monitor_loop(session: UserSession) -> None:
         except asyncio.CancelledError:
             break
         except Exception as e:
+            await db.rollback()
             logger.error("monitor.error", user_id=session.user_id, error=str(e))
         await asyncio.sleep(5)
     logger.info("monitor.stopped", user_id=session.user_id)
@@ -508,6 +518,7 @@ async def _recover_closed_contract(
         )
         await db.commit()
     except Exception as e:
+        await db.rollback()
         logger.warning(
             "monitor.recover_closed_contract_failed",
             trade_id=trade.id,
@@ -589,12 +600,14 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                             if "not found among your open positions" in error_msg.lower():
                                 await _recover_closed_contract(session, db, trade)
                                 continue
+                            await db.rollback()
                             logger.warning(
                                 "monitor.atr_sl_tp_sell_failed",
                                 trade_id=trade.id,
                                 error=error_msg,
                             )
             except Exception as e:
+                await db.rollback()
                 logger.warning(
                     "monitor.atr_sl_tp_check_failed",
                     trade_id=trade.id,
@@ -633,12 +646,14 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                         await db.commit()
                         continue
                     except Exception as e:
+                        await db.rollback()
                         logger.warning(
                             "monitor.crossback_sell_failed",
                             trade_id=trade.id,
                             error=str(e),
                         )
             except Exception as e:
+                await db.rollback()
                 logger.warning(
                     "monitor.crossback_check_failed",
                     trade_id=trade.id,
@@ -687,12 +702,14 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
                         if "not found among your open positions" in error_msg.lower():
                             await _recover_closed_contract(session, db, trade)
                             continue
+                        await db.rollback()
                         logger.warning(
                             "monitor.trailing_stop_sell_failed",
                             trade_id=trade.id,
                             error=error_msg,
                         )
             except Exception as e:
+                await db.rollback()
                 logger.warning(
                     "monitor.trailing_stop_check_failed",
                     trade_id=trade.id,
@@ -742,6 +759,7 @@ async def _check_open_trades(session: UserSession, db: AsyncSession) -> None:
             if "not found among your open positions" in error_msg.lower():
                 await _recover_closed_contract(session, db, trade)
             else:
+                await db.rollback()
                 logger.warning(
                     "monitor.check_failed", trade_id=trade.id, error=error_msg
                 )

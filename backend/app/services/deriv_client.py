@@ -46,6 +46,11 @@ class DerivClient:
         self._should_run = False
         self._listener_task: Optional[asyncio.Task] = None
         self._reconnect_attempts = 0
+        # Cache of valid Multiplier values per symbol — Deriv restricts which
+        # multiplier values each symbol accepts (e.g. Volatility indices vs
+        # Jump indices vs Forex all have different allowed sets), so this is
+        # looked up dynamically via contracts_for rather than guessed.
+        self._multiplier_cache: Dict[str, list] = {}
 
     # ─────────────────────────────────────────────────────────────────────────
     # REST helpers
@@ -256,6 +261,53 @@ class DerivClient:
         })
         return response.get("profit_table", {})
 
+    async def get_contracts_for(self, symbol: str) -> dict:
+        response = await self._send({
+            "contracts_for": symbol,
+            "currency": "USD",
+            "product_type": "multiplier",
+        })
+        return response.get("contracts_for", {})
+
+    async def get_valid_multiplier(self, symbol: str, preferred: int = 100) -> int:
+        """
+        Deriv restricts which multiplier values each symbol accepts, and this
+        set varies a lot — Volatility indices, Jump indices, and Forex pairs
+        all have different allowed ranges. Rather than guess per symbol
+        category (which breaks the moment a new symbol is traded), this asks
+        Deriv directly via contracts_for and picks the closest valid value to
+        the preferred one. Results are cached per symbol for the life of this
+        client/session since the allowed set for a given symbol doesn't
+        change during a session.
+        """
+        if symbol in self._multiplier_cache:
+            allowed = self._multiplier_cache[symbol]
+        else:
+            allowed = []
+            try:
+                data = await self.get_contracts_for(symbol)
+                for spec in data.get("available", []):
+                    m_range = spec.get("multiplier_range")
+                    if m_range:
+                        allowed = [int(m) for m in m_range]
+                        break
+            except Exception as e:
+                logger.warning(
+                    "deriv.contracts_for_failed", symbol=symbol, error=str(e)
+                )
+            self._multiplier_cache[symbol] = allowed
+
+        if not allowed:
+            # Couldn't determine the allowed set — fall back to the
+            # requested value and let Deriv's own validation catch it with
+            # a clear error naming the actual acceptable values, same as it
+            # already does today.
+            return preferred
+
+        if preferred in allowed:
+            return preferred
+        return min(allowed, key=lambda m: abs(m - preferred))
+
     # ─────────────────────────────────────────────────────────────────────────
     # Market data
     # ─────────────────────────────────────────────────────────────────────────
@@ -309,19 +361,32 @@ class DerivClient:
 
         contract_type: "MULTUP" (buy/long) or "MULTDOWN" (sell/short)
         amount:        stake in account currency (basis for the multiplier)
-        multiplier:    leverage, e.g. 100 for 100x
+        multiplier:    preferred leverage, e.g. 100 for 100x — Deriv accepts
+                        a different set of valid multipliers per symbol
+                        (Volatility indices, Jump indices, Forex, etc. all
+                        differ), so this is resolved to the closest value
+                        that symbol actually allows before sending the order.
 
         Unlike binary options (CALL/PUT), Multiplier contracts have no fixed
         duration — they stay open until explicitly sold via sell_contract(),
         which is what makes real entries/exits possible.
         """
+        resolved_multiplier = await self.get_valid_multiplier(symbol, preferred=multiplier)
+        if resolved_multiplier != multiplier:
+            logger.info(
+                "deriv.multiplier_adjusted",
+                symbol=symbol,
+                requested=multiplier,
+                resolved=resolved_multiplier,
+            )
+
         proposal = await self._send({
             "proposal": 1,
             "amount": amount,
             "basis": "stake",
             "contract_type": contract_type,
             "currency": "USD",
-            "multiplier": multiplier,
+            "multiplier": resolved_multiplier,
             "underlying_symbol": symbol,
         })
         proposal_id = proposal.get("proposal", {}).get("id")
@@ -339,7 +404,7 @@ class DerivClient:
             symbol=symbol,
             contract_type=contract_type,
             amount=amount,
-            multiplier=multiplier,
+            multiplier=resolved_multiplier,
         )
         return contract
 

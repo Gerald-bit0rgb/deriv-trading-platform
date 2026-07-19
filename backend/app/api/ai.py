@@ -85,6 +85,7 @@ async def get_signal(
         rsi_value=signal.rsi_value,
         volatility=signal.volatility,
         trend_direction=signal.trend_direction,
+        entry_timeframe=signal.entry_timeframe,
         generated_at=signal.generated_at,
     )
 
@@ -117,6 +118,7 @@ async def get_batch_signals(
             rsi_value=sig.rsi_value,
             volatility=sig.volatility,
             trend_direction=sig.trend_direction,
+            entry_timeframe=sig.entry_timeframe,
             generated_at=sig.generated_at,
         )
         for sig in results.values()

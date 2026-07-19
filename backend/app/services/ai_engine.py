@@ -57,6 +57,7 @@ class Signal:
     rsi_value: Optional[float] = None
     volatility: str = "MEDIUM"
     trend_direction: Optional[str] = None    # BULLISH | BEARISH | NEUTRAL | None
+    entry_timeframe: Optional[int] = None    # seconds — the candle timeframe actually used
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -456,6 +457,7 @@ class AIEngine:
             rsi=round(rsi_now, 1),
             volatility=volatility,
             trend_direction=trend_direction,
+            entry_timeframe=entry_timeframe,
         )
 
         return Signal(
@@ -469,6 +471,7 @@ class AIEngine:
             rsi_value=round(rsi_now, 1),
             volatility=volatility,
             trend_direction=trend_direction,
+            entry_timeframe=entry_timeframe,
         )
 
     async def check_exit_signal(self, symbol: str, trade_type: str, granularity: int = 60) -> bool:
